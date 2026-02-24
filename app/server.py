@@ -1,5 +1,5 @@
 import asyncio
-import os
+import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from dotenv import load_dotenv
@@ -10,10 +10,12 @@ from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.genai import types
 
 from agents import root_agent
+from agents.cursor_state import set_cursor
 
 load_dotenv()
 
 APP_NAME = "live_voice_agent"
+INPUT_MIME = "audio/pcm;rate=16000"
 
 app = FastAPI()
 
@@ -51,17 +53,32 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
     async def upstream() -> None:
         """
         Receive binary audio frames from client and forward to ADK LiveRequestQueue.
+        Receive:
+          - binary frames: PCM16@16kHz audio chunks
+          - text frames: JSON control messages (cursor updates)
         """
         try:
             while True:
                 msg = await websocket.receive()
                 if "bytes" in msg and msg["bytes"] is not None:
                     audio_bytes: bytes = msg["bytes"]
+                    if not audio_bytes:
+                        continue
                     blob = types.Blob(mime_type=INPUT_MIME, data=audio_bytes)
                     queue.send_realtime(blob)
-                elif "text" in msg and msg["text"] is not None:
-                    # allow future control messages; ignore for now
-                    pass
+                    continue
+
+                # control text (cursor)
+                if "text" in msg and msg["text"] is not None:
+                    try:
+                        payload = json.loads(msg["text"])
+                    except Exception:
+                        continue
+                    if payload.get("type") == "cursor":
+                        x = payload.get("x")
+                        y = payload.get("y")
+                        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                            await set_cursor(user_id, session_id, int(x), int(y))
         except WebSocketDisconnect:
             pass
 

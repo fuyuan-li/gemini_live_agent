@@ -5,6 +5,12 @@ from typing import Any
 import sounddevice as sd
 import websockets
 
+import json
+import time
+from pynput.mouse import Controller
+
+_mouse = Controller()
+
 WS_URL = "ws://127.0.0.1:8000/ws/local_user/local_session"
 
 # Live audio requirements per ADK streaming guide:
@@ -19,6 +25,17 @@ DTYPE = "int16"  # PCM16
 CHUNK_MS = 100
 CHUNK_SAMPLES = int(IN_RATE * CHUNK_MS / 1000)
 
+
+def get_cursor_pos():
+    x, y = _mouse.position
+    return int(x), int(y)
+
+
+async def cursor_sender(ws):
+    while True:
+        x, y = get_cursor_pos()
+        await ws.send(json.dumps({"type": "cursor", "x": x, "y": y}))
+        await asyncio.sleep(0.05)  # 20Hz
 
 async def mic_sender(ws: websockets.ClientConnection) -> None:
     """
@@ -89,6 +106,7 @@ async def main() -> None:
         await asyncio.gather(
             mic_sender(ws),
             speaker_player(ws),
+            cursor_sender(ws),
         )
 
 

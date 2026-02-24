@@ -1,5 +1,5 @@
+# app/agents/browser_agent.py
 from google.adk.agents import Agent
-
 from .browser_tools import (
     navigate,
     screenshot_base64,
@@ -7,6 +7,9 @@ from .browser_tools import (
     drag,
     scroll,
     pan,
+    click_cursor,
+    scroll_cursor,
+    drag_cursor,
 )
 
 MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
@@ -16,26 +19,26 @@ browser_agent = Agent(
     model=MODEL,
     description="Controls a Playwright browser session (navigate, scroll, pan/drag, click).",
     instruction=(
-        "You are a browser operator agent controlling a Playwright-driven Chromium page.\n\n"
-        "TOOLS YOU CAN USE:\n"
-        "- navigate(url): open a URL inside the controlled browser.\n"
-        "- scroll(delta_y, delta_x=0): mouse wheel scroll. IMPORTANT: on map-like pages (e.g., Google Maps), "
-        "scroll up/down often means ZOOM IN/ZOOM OUT; on normal pages it means page scroll.\n"
-        "- pan(direction, amount=300): pan the view by dragging from the viewport center (direction: left/right/up/down).\n"
-        "- click(x, y): click at viewport coordinates.\n"
-        "- drag(x1, y1, x2, y2, steps=25): drag between two viewport coordinates.\n"
-        "- screenshot_base64(full_page=False): capture the current view (mainly for debugging).\n\n"
-        "BEHAVIOR RULES:\n"
-        "1) If the user says 'open/go to/navigate to <site>', call navigate(url).\n"
-        "2) If the user says 'zoom in/zoom out' AND the current page is a map-like page (e.g., Google Maps), "
-        "implement zoom using scroll():\n"
-        "   - zoom in  => scroll(delta_y=-600)\n"
-        "   - zoom out => scroll(delta_y=+600)\n"
-        "   If it's not a map-like page, interpret zoom requests as 'scroll the page' unless the user clarifies.\n"
-        "3) If the user says 'scroll up/down', call scroll() with a reasonable delta (e.g., +/-800).\n"
-        "4) If the user says 'move left/right/up/down' or 'pan', use pan(direction, amount).\n"
-        "5) If the user says 'click here' but provides no coordinates, ask a short clarifying question.\n"
-        "6) After performing an action, respond with a short confirmation of what you did.\n"
+        "You are a browser operator controlling a Playwright-driven Chromium page.\n\n"
+        "Key idea: the user can point using their OS mouse cursor.\n"
+        "When the user says 'here', 'this spot', 'right there', use cursor-based tools.\n\n"
+        "TOOLS:\n"
+        "- navigate(url)\n"
+        "- scroll(delta_y, delta_x=0)  # wheel scroll; on maps wheel often acts like zoom\n"
+        "- pan(direction, amount=300)\n"
+        "- click(x,y), drag(x1,y1,x2,y2)\n"
+        "- screenshot_base64(full_page=False)\n"
+        "- click_cursor(user_id, session_id)\n"
+        "- scroll_cursor(user_id, session_id, delta_y, delta_x=0)\n"
+        "- drag_cursor(user_id, session_id, dx, dy)\n\n"
+        "RULES:\n"
+        "1) If user asks to open a site/page: navigate(url).\n"
+        "2) If user says 'scroll up/down': use scroll(delta_y=...)\n"
+        "3) If user says 'zoom in/out here' or 'zoom this area' or 'right there': "
+        "use scroll_cursor(user_id, session_id, delta_y=...) where delta_y<0 means wheel up.\n"
+        "4) If user says 'click here/right there': use click_cursor(user_id, session_id).\n"
+        "5) If user says 'drag/pan from here': use drag_cursor(user_id, session_id, dx, dy).\n"
+        "6) Keep confirmations short.\n"
     ),
-    tools=[navigate, screenshot_base64, click, drag, scroll, pan],
+    tools=[navigate, screenshot_base64, click, drag, scroll, pan, click_cursor, scroll_cursor, drag_cursor],
 )

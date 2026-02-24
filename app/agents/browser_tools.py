@@ -2,7 +2,8 @@ import base64
 import asyncio
 from typing import Optional
 
-from .browser_runtime import get_page
+from .cursor_state import get_cursor
+from .browser_runtime import get_page, get_viewport_origin_screen, refresh_viewport_origin_screen
 
 
 async def navigate(url: str) -> dict:
@@ -140,3 +141,70 @@ async def pan(direction: str, amount: int = 300) -> dict:
         return {"ok": False, "error": f"Unknown direction: {direction}"}
 
     return await drag(cx, cy, cx + dx, cy + dy, steps=30)
+
+
+async def _move_to_cursor(user_id: str, session_id: str):
+    cur = await get_cursor(user_id, session_id)
+    if cur is None:
+        return None
+
+    page = await get_page(headless=False)
+    origin_x, origin_y = await refresh_viewport_origin_screen()
+    # origin_x, origin_y = await get_viewport_origin_screen()
+
+    # screen -> viewport
+    vx = int(cur.x - origin_x)
+    vy = int(cur.y - origin_y)
+
+    # 可选：clamp 到 viewport 内
+    vp = page.viewport_size or {"width": 1280, "height": 800}
+    vx = max(0, min(vx, vp["width"] - 1))
+    vy = max(0, min(vy, vp["height"] - 1))
+
+    await page.mouse.move(vx, vy)
+    return (vx, vy)
+
+
+async def click_cursor(user_id: str, session_id: str) -> dict:
+    """
+    Click at the current OS cursor position.
+    """
+    pos = await _move_to_cursor(user_id, session_id)
+    if pos is None:
+        return {"ok": False, "error": "No cursor position received yet."}
+    page = await get_page(headless=False)
+    await page.mouse.click(pos[0], pos[1])
+    return {"ok": True, "action": "click_cursor", "x": pos[0], "y": pos[1], "url": page.url}
+
+
+async def scroll_cursor(user_id: str, session_id: str, delta_y: int, delta_x: int = 0) -> dict:
+    """
+    Scroll (wheel) at the current OS cursor position.
+    Useful for 'zoom here' behavior on map/canvas apps.
+    """
+    pos = await _move_to_cursor(user_id, session_id)
+    if pos is None:
+        return {"ok": False, "error": "No cursor position received yet."}
+    page = await get_page(headless=False)
+    await page.mouse.wheel(delta_x, delta_y)
+    return {
+        "ok": True,
+        "action": "scroll_cursor",
+        "x": pos[0],
+        "y": pos[1],
+        "delta_x": delta_x,
+        "delta_y": delta_y,
+        "url": page.url,
+    }
+
+
+async def drag_cursor(user_id: str, session_id: str, dx: int, dy: int, steps: int = 30) -> dict:
+    """
+    Drag starting from cursor position by (dx, dy).
+    """
+    pos = await _move_to_cursor(user_id, session_id)
+    if pos is None:
+        return {"ok": False, "error": "No cursor position received yet."}
+    x1, y1 = pos
+    x2, y2 = x1 + dx, y1 + dy
+    return await drag(x1, y1, x2, y2, steps=steps)
