@@ -1,0 +1,18 @@
+echo 'GOOGLE_API_KEY="YOUR_API_KEY"' > agents/concierge/.env
+
+
+macOS 需要设置 SSL_CERT_FILE 才能做语音/视频测试，Vertex 的 “Live API using ADK” 指南明确要求这一步。 ￼
+运行前记得：
+export SSL_CERT_FILE=$(python -m certifi)
+
+
+运行方式（两端各一个终端）
+
+终端 A（server）：
+source .venv/bin/activate
+cd app
+uvicorn server:app --host 127.0.0.1 --port 8000
+
+终端 B（client）：
+source .venv/bin/activate
+python client/voice_cli.py

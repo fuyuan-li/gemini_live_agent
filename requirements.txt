@@ -1,0 +1,19 @@
+# Core ADK + Gemini Live
+google-adk==1.25.1
+google-genai>=1.29.0
+
+# Server
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-dotenv>=1.0.1
+
+# WS client/server
+websockets==15.0.1
+
+# Audio IO
+sounddevice>=0.4.6
+numpy>=1.26.0
+certifi>=2024.12.0
+
+# Browser automation (Python)
+playwright>=1.50.0
