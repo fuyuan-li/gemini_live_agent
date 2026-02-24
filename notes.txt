@@ -11,7 +11,7 @@ export SSL_CERT_FILE=$(python -m certifi)
 终端 A（server）：
 source .venv/bin/activate
 cd app
-uvicorn server:app --host 127.0.0.1 --port 8000
+uvicorn server:app --host 127.0.0.1 --port 8000 #如果不在/app，而是在根目录，uvicorn app.server:app --host 127.0.0.1 --port 8000
 
 终端 B（client）：
 source .venv/bin/activate

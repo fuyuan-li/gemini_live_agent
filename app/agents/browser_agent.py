@@ -1,6 +1,6 @@
 from google.adk.agents import Agent
 
-from app.tools.browser_tools import (
+from app.tools.browser import (
     navigate,
     screenshot_base64,
     click,

@@ -12,7 +12,7 @@ from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.genai import types
 from google.adk.events import Event, EventActions
 
-from agents import root_agent
+from .agents import root_agent
 
 load_dotenv()
 
