@@ -12,7 +12,9 @@ from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.genai import types
 from google.adk.events import Event, EventActions
 
+from app.state.realtime_pointer import set_cursor
 from .agents import root_agent
+
 
 load_dotenv()
 
@@ -45,7 +47,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
     # Audio-in / Audio-out streaming config  [oai_citation:11‡Google GitHub](https://google.github.io/adk-docs/streaming/dev-guide/part1/)
     run_config = RunConfig(
         streaming_mode=StreamingMode.BIDI,
-        response_modalities=["AUDIO"],
+        response_modalities=[types.Modality.AUDIO],
         # optional: transcriptions (handy for debugging)
         # input_audio_transcription=types.AudioTranscriptionConfig(),
         # output_audio_transcription=types.AudioTranscriptionConfig(),
@@ -86,19 +88,14 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                     if isinstance(x, (int, float)) and isinstance(y, (int, float)):
                         x_i, y_i = int(x), int(y)
 
-                        # ✅ 用 system event 写入 session.state（通过 state_delta）
-                        actions = EventActions(
-                            state_delta={"cursor": {"x": x_i, "y": y_i, "ts": time.time()}}
-                        )
-                        system_event = Event(
-                            invocation_id=f"cursor_{time.time()}",
-                            author="system",
-                            actions=actions,
-                            timestamp=time.time(),
-                        )
+                        # print("[cursor] recv", x_i, y_i, "sid=", session_id, "uid=", user_id)
+                        await set_cursor(user_id=user_id, session_id=session_id, x=x_i, y=y_i)
 
-                        # ✅ append_event 签名：append_event(session, event)
-                        await session_service.append_event(session=session, event=system_event)
+                        # s2 = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+                        # if s2:
+                        #     print("[cursor] after append, session.state.cursor =", (s2.state or {}).get("cursor"))
+                        # else:
+                        #     print("[cursor] after append, session not found")
 
         except WebSocketDisconnect:
             pass

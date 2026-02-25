@@ -12,6 +12,9 @@ from app.tools.browser import (
     drag_here,
 )
 
+from app.callbacks.pointer import before_tool_inject_cursor
+
+
 MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 
 browser_agent = Agent(
@@ -42,4 +45,5 @@ browser_agent = Agent(
         "6) Keep confirmations short.\n"
     ),
     tools=[navigate, screenshot_base64, click, drag, scroll, pan, click_here, scroll_here, drag_here],
+    before_tool_callback=before_tool_inject_cursor,
 )

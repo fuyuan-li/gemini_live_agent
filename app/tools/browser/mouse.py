@@ -2,7 +2,7 @@
 import asyncio
 from typing import Optional, Tuple
 
-from google.adk.tools import ToolContext
+from google.adk.tools.tool_context import ToolContext
 
 from app.runtime import get_page, refresh_viewport_origin_screen
 
@@ -103,7 +103,10 @@ def _get_cursor_from_state(tool_context: ToolContext) -> Optional[Tuple[int, int
     Expected:
       tool_context.state["cursor"] = {"x": int, "y": int, "ts": float}
     """
-    cur = tool_context.state.get("cursor")
+    current_session_state = tool_context.state or {}
+    cur = current_session_state.get("cursor")
+    print(f"[tool] Retrieved session state from tool_context.session: {current_session_state.to_dict()}")
+    print(f"[tool] cursor raw = {cur}")
     if not isinstance(cur, dict):
         return None
     x = cur.get("x")
@@ -117,12 +120,13 @@ async def _cursor_screen_to_viewport(tool_context: ToolContext) -> Optional[Tupl
     """
     Convert OS screen coords -> Playwright viewport coords using runtime window mapping.
     """
-    cur = _get_cursor_from_state(tool_context)
+    cur =  _get_cursor_from_state(tool_context)
     if cur is None:
         return None
 
     page = await get_page(headless=False)
     origin_x, origin_y = await refresh_viewport_origin_screen()
+    print(f"[tool] origin= {origin_x, origin_y}, cur={dir(cur)}")
 
     vx = int(cur[0] - origin_x)
     vy = int(cur[1] - origin_y)
