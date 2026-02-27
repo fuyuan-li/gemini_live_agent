@@ -11,15 +11,34 @@ from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.genai import types
 from google.adk.events import Event, EventActions
+from google.genai.errors import APIError
+import traceback
 
 from app.state.realtime_pointer import set_cursor
 from .agents import root_agent
-
+from app.runtime.genai_ws_sniffer import record_outbound, get_last_outbound
 
 load_dotenv()
 
 APP_NAME = "live_voice_agent"
 INPUT_MIME = "audio/pcm;rate=16000"
+
+def install_websockets_send_sniffer():
+    import websockets.asyncio.connection as conn_mod
+    Connection = conn_mod.Connection
+    if getattr(Connection.send, "_sniffed", False):
+        return
+
+    _orig = Connection.send
+
+    async def send(self, message, *args, **kwargs):
+        record_outbound(message)
+        return await _orig(self, message, *args, **kwargs)
+
+    send._sniffed = True  # type: ignore[attr-defined]
+    Connection.send = send  # type: ignore[assignment]
+
+install_websockets_send_sniffer()
 
 app = FastAPI()
 
@@ -103,24 +122,48 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
     async def downstream() -> None:
         """
         Consume ADK events and forward audio bytes back to client.
+        Also print last outbound frame to Gemini when APIError happens (e.g., 1007).
         """
-        async for event in runner.run_live(
-            user_id=user_id,
-            session_id=session_id,
-            live_request_queue=queue,
-            run_config=run_config,
-        ):
-            if not event.content or not event.content.parts:
-                continue
-            for part in event.content.parts:
-                if not part.inline_data:
+        try:
+            async for event in runner.run_live(
+                user_id=user_id,
+                session_id=session_id,
+                live_request_queue=queue,
+                run_config=run_config,
+            ):
+                if not event.content or not event.content.parts:
                     continue
-                mt = part.inline_data.mime_type
-                data = part.inline_data.data
-                if mt and mt.startswith("audio/pcm") and data is not None:
-                    await websocket.send_bytes(data)
+                for part in event.content.parts:
+                    if not part.inline_data:
+                        continue
+                    mt = part.inline_data.mime_type
+                    data = part.inline_data.data
+                    if mt and mt.startswith("audio/pcm") and data is not None:
+                        await websocket.send_bytes(data)
+
+        except APIError as e:
+            # This is the key "PRINT PRINT PRINT"
+            last = get_last_outbound()
+            print(f"[downstream] APIError: status_code={getattr(e, 'status_code', None)} message={e}")
+            print(f"[downstream] LAST OUTBOUND (server->Gemini): {last}")
+            traceback.print_exc()
+            # re-raise so gather can see it (or swallow if you want)
+            raise
+
+        except Exception as e:
+            last = get_last_outbound()
+            print(f"[downstream] Unexpected exception: {type(e).__name__}: {e}")
+            print(f"[downstream] LAST OUTBOUND (server->Gemini): {last}")
+            traceback.print_exc()
+            raise
 
     try:
-        await asyncio.gather(upstream(), downstream(), return_exceptions=True)
+        results = await asyncio.gather(upstream(), downstream(), return_exceptions=True)
+
+        # Print exceptions so they don't disappear
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                print(f"[ws] task#{i} exception: {type(r).__name__}: {r}")
+
     finally:
         queue.close()
