@@ -8,6 +8,7 @@ import websockets
 import json
 import time
 from pynput.mouse import Controller
+from client.ws_guard import OutboundTelemetry, WSSender
 
 _mouse = Controller()
 
@@ -31,13 +32,13 @@ def get_cursor_pos():
     return int(x), int(y)
 
 
-async def cursor_sender(ws):
+async def cursor_sender(sender: WSSender):
     while True:
         x, y = get_cursor_pos()
-        await ws.send(json.dumps({"type": "cursor", "x": x, "y": y}))
+        await sender.send_json("cursor", {"type": "cursor", "x": x, "y": y})
         await asyncio.sleep(0.05)  # 20Hz
 
-async def mic_sender(ws: websockets.ClientConnection) -> None:
+async def mic_sender(sender: WSSender) -> None:
     """
     Toggle talking with Enter.
     When talking, stream raw PCM16@16kHz bytes to the server as WS binary frames.
@@ -73,7 +74,7 @@ async def mic_sender(ws: websockets.ClientConnection) -> None:
             while talking:
                 try:
                     chunk = await asyncio.wait_for(q.get(), timeout=0.25)
-                    await ws.send(chunk)
+                    await sender.send_bytes("mic_chunk", chunk)
                 except asyncio.TimeoutError:
                     # no audio chunk yet
                     continue
@@ -96,18 +97,25 @@ async def speaker_player(ws: websockets.ClientConnection) -> None:
 
 
 async def main() -> None:
-    # websockets 15 new API: connect() returns a ClientConnection
     async with websockets.connect(
         WS_URL,
         max_size=None,
         ping_interval=20,
         ping_timeout=20,
     ) as ws:
-        await asyncio.gather(
-            mic_sender(ws),
-            speaker_player(ws),
-            cursor_sender(ws),
-        )
+        telemetry = OutboundTelemetry()
+        sender = WSSender(ws, telemetry)
+
+        try:
+            await asyncio.gather(
+                mic_sender(sender),
+                speaker_player(ws),
+                cursor_sender(sender),
+            )
+        except websockets.exceptions.ConnectionClosedError as e:
+            print(f"[voice_cli] WS CLOSED: code={e.code}, reason={e.reason}")
+            print(f"[voice_cli] LAST OUTBOUND: {telemetry.last}")
+            raise
 
 
 if __name__ == "__main__":

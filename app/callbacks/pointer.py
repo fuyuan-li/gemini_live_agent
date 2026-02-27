@@ -35,6 +35,7 @@ async def before_tool_inject_cursor(
        - realtime store cursor (what ws is updating)
     2) Inject realtime cursor into tool_context.state['cursor'] so HERE tools can read it.
     """
+    print(f"[before_tool] tool={tool.name} args={args}")
     uid, sid = _get_uid_sid(tool_context)
 
     # ToolContext delta-aware view
@@ -62,5 +63,51 @@ async def before_tool_inject_cursor(
             "y": int(rt_cursor["y"]),
             "ts": float(rt_cursor["ts"]),
         }
+
+    err = cursor_in_screen(tool, args, tool_context)  # optionally block if cursor looks off-screen
+    if err is not None:
+        return err
+    
+    return None
+
+
+HERE_TOOLS = {"click_here", "scroll_here", "drag_here"}
+
+def cursor_in_screen(
+    tool: BaseTool,
+    args: Dict[str, Any],
+    tool_context: ToolContext,
+) -> Optional[Dict[str, Any]]:
+    # 只对 HERE tools 做 cursor 检查
+    if tool.name in HERE_TOOLS:
+        cur = tool_context.state.get("cursor")
+        if not cur:
+            return {"error": "I can't find your cursor position. Move your mouse onto the target area and try again."}
+
+        try:
+            x = int(cur.get("x"))
+            y = int(cur.get("y"))
+        except Exception:
+            return {"error": "Cursor state is malformed; please try again."}
+
+        # if x < 0 or y < 0:
+        #     return {
+        #         "error": "Your cursor looks off-screen. Please move it onto the target area (e.g., the map) and say it again."
+        #     }
+
+    # tool-specific arg sanity：按你的 tools 实际参数名来
+    if tool.name in {"scroll_here", "scroll"}:
+        try:
+            float(args.get("delta_y", 0))
+            float(args.get("delta_x", 0))
+        except Exception:
+            return {"error": "Scroll arguments are invalid; please try again."}
+
+    if tool.name == "drag_here":
+        try:
+            float(args.get("dx", 0))
+            float(args.get("dy", 0))
+        except Exception:
+            return {"error": "Drag arguments are invalid; please try again."}
 
     return None
