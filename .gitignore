@@ -47,3 +47,6 @@ htmlcov/
 # Temporary files
 tmp/
 *.tmp
+
+# local files
+notes.txt
