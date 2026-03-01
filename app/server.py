@@ -17,6 +17,7 @@ import traceback
 from app.state.realtime_pointer import set_cursor
 from .agents import root_agent
 from app.runtime.genai_ws_sniffer import record_outbound, get_last_outbound
+from app.runtime.cursor_payload import parse_cursor_payload
 
 load_dotenv()
 
@@ -101,20 +102,18 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 except Exception:
                     continue
 
-                if payload.get("type") == "cursor":
-                    x = payload.get("x")
-                    y = payload.get("y")
-                    if isinstance(x, (int, float)) and isinstance(y, (int, float)):
-                        x_i, y_i = int(x), int(y)
+                pos = parse_cursor_payload(payload)
+                if pos is not None:
+                    x_i, y_i = pos
 
-                        # print("[cursor] recv", x_i, y_i, "sid=", session_id, "uid=", user_id)
-                        await set_cursor(user_id=user_id, session_id=session_id, x=x_i, y=y_i)
+                    # print("[cursor] recv", x_i, y_i, "sid=", session_id, "uid=", user_id)
+                    await set_cursor(user_id=user_id, session_id=session_id, x=x_i, y=y_i)
 
-                        # s2 = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
-                        # if s2:
-                        #     print("[cursor] after append, session.state.cursor =", (s2.state or {}).get("cursor"))
-                        # else:
-                        #     print("[cursor] after append, session not found")
+                    # s2 = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+                    # if s2:
+                    #     print("[cursor] after append, session.state.cursor =", (s2.state or {}).get("cursor"))
+                    # else:
+                    #     print("[cursor] after append, session not found")
 
         except WebSocketDisconnect:
             pass
