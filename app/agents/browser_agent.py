@@ -20,15 +20,15 @@ MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 browser_agent = Agent(
     name="browser_agent",
     model=MODEL,
-    description="Controls a Playwright browser session (navigate, scroll, pan/drag, click), supports 'here' via OS mouse cursor.",
+    description="Controls a Playwright browser session (navigate, scroll, pan/drag, click), supports 'here' via pointer cursor (hand/mouse).",
     instruction=(
         "You control a Playwright-driven Chromium page.\n\n"
-        "Key idea: the user can point using their OS mouse cursor.\n"
+        "Key idea: the user can point using a pointer cursor from hand tracking or mouse.\n"
         "When the user says 'here', 'this spot', 'right there', use the HERE tools.\n\n"
         "TOOLS:\n"
         "- navigate(url): open a URL inside the controlled browser.\n"
         "- pan(direction, amount=300): pan from viewport center.\n"
-        "- click_here(): click at current OS mouse cursor position.\n"
+        "- click_here(): click at current pointer position.\n"
         "- scroll_here(delta_y, delta_x=0): wheel at current cursor position.\n"
         "- drag_here(dx, dy): drag starting at cursor by offsets.\n\n"
         "RULES:\n"

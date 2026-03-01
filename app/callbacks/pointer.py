@@ -82,7 +82,7 @@ def cursor_in_screen(
     if tool.name in HERE_TOOLS:
         cur = tool_context.state.get("cursor")
         if not cur:
-            return {"error": "I can't find your cursor position. Move your mouse onto the target area and try again."}
+            return {"error": "I can't find your pointer position yet. Move your hand to the target area and try again."}
 
         try:
             x = int(cur.get("x"))
