@@ -19,3 +19,7 @@ certifi>=2024.12.0
 playwright>=1.50.0
 pynput==1.8.1
 pyobjc-framework-Quartz==12.1
+
+# Hand tracking cursor
+opencv-python>=4.10.0
+mediapipe>=0.10.14

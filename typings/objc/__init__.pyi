@@ -1,0 +1,3 @@
+from typing import Any
+
+def super(cls: type[Any], obj: Any) -> Any: ...
