@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
+import threading
 
 import sounddevice as sd
 import websockets
 
 from client.cursor.provider import CursorProvider, HandCursorProvider, MouseCursorProvider
+from client.local_executor import LocalToolExecutor
 from client.ws_guard import OutboundTelemetry, WSSender
 
 # Live audio requirements per ADK streaming guide:
@@ -22,6 +25,7 @@ DTYPE = "int16"
 CHUNK_MS = 100
 CHUNK_SAMPLES = int(IN_RATE * CHUNK_MS / 1000)
 DEFAULT_WS_URL = "ws://127.0.0.1:8000/ws/local_user/local_session"
+RECONNECT_DELAY_S = 2.0
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -41,6 +45,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--hand-mirror", action=argparse.BooleanOptionalAction, default=True)
 
     return p
+
+
+def _start_stdin_reader(loop: asyncio.AbstractEventLoop, toggle_q: asyncio.Queue[None]) -> threading.Event:
+    stop_evt = threading.Event()
+
+    def worker() -> None:
+        while not stop_evt.is_set():
+            line = sys.stdin.readline()
+            if line == "":
+                continue
+            asyncio.run_coroutine_threadsafe(toggle_q.put(None), loop)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    return stop_evt
 
 
 async def cursor_sender(sender: WSSender, provider: CursorProvider, send_hz: float) -> None:
@@ -63,13 +82,12 @@ async def cursor_sender(sender: WSSender, provider: CursorProvider, send_hz: flo
         await asyncio.sleep(interval)
 
 
-async def mic_sender(sender: WSSender) -> None:
+async def mic_sender(sender: WSSender, toggle_q: asyncio.Queue[None]) -> None:
     """
     Toggle talking with Enter.
     When talking, stream raw PCM16@16kHz bytes to the server as WS binary frames.
     """
     talking = False
-    loop = asyncio.get_running_loop()
     q: asyncio.Queue[bytes] = asyncio.Queue()
 
     def callback(indata, frames, time_info, status) -> None:
@@ -88,7 +106,7 @@ async def mic_sender(sender: WSSender) -> None:
         callback=callback,
     ):
         while True:
-            await loop.run_in_executor(None, sys.stdin.readline)
+            await toggle_q.get()
             talking = not talking
             print("🎙️  TALKING" if talking else "🛑  STOPPED")
 
@@ -100,9 +118,12 @@ async def mic_sender(sender: WSSender) -> None:
                     continue
 
 
-async def speaker_player(ws: websockets.ClientConnection) -> None:
+async def receiver_loop(
+    ws: websockets.ClientConnection,
+    executor: LocalToolExecutor,
+) -> None:
     """
-    Receive raw PCM16@24kHz bytes from server and play them.
+    Receive audio bytes plus JSON control messages from the server.
     """
     with sd.RawOutputStream(
         samplerate=OUT_RATE,
@@ -113,6 +134,20 @@ async def speaker_player(ws: websockets.ClientConnection) -> None:
         async for msg in ws:
             if isinstance(msg, bytes) and msg:
                 out.write(msg)
+                continue
+
+            if not isinstance(msg, str):
+                continue
+
+            try:
+                payload = json.loads(msg)
+            except Exception:
+                print(f"[voice_cli] Ignoring non-JSON text frame: {msg[:120]}")
+                continue
+
+            handled = await executor.handle_message(payload)
+            if not handled:
+                print(f"[voice_cli] Ignoring unsupported server message: {payload}")
 
 
 def build_cursor_provider(args: argparse.Namespace):
@@ -136,27 +171,34 @@ async def run_client(args: argparse.Namespace) -> None:
     if not provider.start():
         raise RuntimeError(f"failed to start cursor provider: {provider.status()}")
 
-    try:
-        async with websockets.connect(
-            args.ws_url,
-            max_size=None,
-            ping_interval=20,
-            ping_timeout=20,
-        ) as ws:
-            telemetry = OutboundTelemetry()
-            sender = WSSender(ws, telemetry)
+    loop = asyncio.get_running_loop()
+    toggle_q: asyncio.Queue[None] = asyncio.Queue()
+    stdin_stop_evt = _start_stdin_reader(loop, toggle_q)
 
+    try:
+        while True:
+            telemetry = OutboundTelemetry()
             try:
-                await asyncio.gather(
-                    mic_sender(sender),
-                    speaker_player(ws),
-                    cursor_sender(sender, provider, args.cursor_send_hz),
-                )
-            except websockets.exceptions.ConnectionClosedError as exc:
-                print(f"[voice_cli] WS CLOSED: code={exc.code}, reason={exc.reason}")
+                async with websockets.connect(
+                    args.ws_url,
+                    max_size=None,
+                    ping_interval=20,
+                    ping_timeout=20,
+                ) as ws:
+                    sender = WSSender(ws, telemetry)
+                    executor = LocalToolExecutor(provider=provider, sender=sender)
+                    await asyncio.gather(
+                        mic_sender(sender, toggle_q),
+                        receiver_loop(ws, executor),
+                        cursor_sender(sender, provider, args.cursor_send_hz),
+                    )
+            except (OSError, websockets.exceptions.ConnectionClosed) as exc:
+                print(f"[voice_cli] connection lost: {exc}")
                 print(f"[voice_cli] LAST OUTBOUND: {telemetry.last}")
-                raise
+                print(f"[voice_cli] reconnecting in {RECONNECT_DELAY_S:.1f}s...")
+                await asyncio.sleep(RECONNECT_DELAY_S)
     finally:
+        stdin_stop_evt.set()
         provider.stop()
 
 

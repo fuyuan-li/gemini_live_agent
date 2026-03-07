@@ -137,17 +137,68 @@ async def _cursor_screen_to_viewport(tool_context: ToolContext) -> Optional[Tupl
     return vx, vy
 
 
+async def screen_to_viewport(x: int, y: int) -> Tuple[int, int]:
+    """
+    Convert OS screen coordinates into Playwright viewport coordinates.
+    """
+    page = await get_page(headless=False)
+    origin_x, origin_y = await refresh_viewport_origin_screen()
+
+    vx = int(int(x) - origin_x)
+    vy = int(int(y) - origin_y)
+
+    vp = page.viewport_size or {"width": 1280, "height": 800}
+    vx = max(0, min(vx, int(vp["width"]) - 1))
+    vy = max(0, min(vy, int(vp["height"]) - 1))
+    return vx, vy
+
+
+async def click_screen_point(x: int, y: int) -> dict:
+    """
+    Click using OS screen coordinates.
+    """
+    vx, vy = await screen_to_viewport(x, y)
+    page = await get_page(headless=False)
+    await page.mouse.click(vx, vy)
+    return {"ok": True, "action": "click_here", "x": vx, "y": vy, "url": page.url}
+
+
+async def scroll_screen_point(x: int, y: int, delta_y: int, delta_x: int = 0) -> dict:
+    """
+    Wheel scroll using OS screen coordinates.
+    """
+    vx, vy = await screen_to_viewport(x, y)
+    page = await get_page(headless=False)
+    await page.mouse.move(vx, vy)
+    await page.mouse.wheel(int(delta_x), int(delta_y))
+    return {
+        "ok": True,
+        "action": "scroll_here",
+        "x": vx,
+        "y": vy,
+        "delta_x": int(delta_x),
+        "delta_y": int(delta_y),
+        "url": page.url,
+    }
+
+
+async def drag_screen_point_by_offset(x: int, y: int, dx: int, dy: int, steps: int = 30) -> dict:
+    """
+    Drag from an OS screen coordinate by viewport-relative offsets.
+    """
+    vx, vy = await screen_to_viewport(x, y)
+    return await drag(vx, vy, vx + int(dx), vy + int(dy), steps=int(steps))
+
+
 async def click_here(tool_context: ToolContext) -> dict:
     """
     Click at the current OS mouse cursor position ("here").
     """
-    pos = await _cursor_screen_to_viewport(tool_context)
-    if pos is None:
+    cur = _get_cursor_from_state(tool_context)
+    if cur is None:
         return {"ok": False, "error": "No cursor in session state yet."}
 
-    page = await get_page(headless=False)
-    await page.mouse.click(pos[0], pos[1])
-    return {"ok": True, "action": "click_here", "x": pos[0], "y": pos[1], "url": page.url}
+    return await click_screen_point(cur[0], cur[1])
 
 
 async def scroll_here(tool_context: ToolContext, delta_y: int, delta_x: int = 0) -> dict:
@@ -155,32 +206,19 @@ async def scroll_here(tool_context: ToolContext, delta_y: int, delta_x: int = 0)
     Wheel scroll at the current OS cursor position.
     Useful for 'zoom here' behavior on map/canvas apps.
     """
-    pos = await _cursor_screen_to_viewport(tool_context)
-    if pos is None:
+    cur = _get_cursor_from_state(tool_context)
+    if cur is None:
         return {"ok": False, "error": "No cursor in session state yet."}
 
-    page = await get_page(headless=False)
-    await page.mouse.move(pos[0], pos[1])
-    await page.mouse.wheel(int(delta_x), int(delta_y))
-    return {
-        "ok": True,
-        "action": "scroll_here",
-        "x": pos[0],
-        "y": pos[1],
-        "delta_x": int(delta_x),
-        "delta_y": int(delta_y),
-        "url": page.url,
-    }
+    return await scroll_screen_point(cur[0], cur[1], delta_y=int(delta_y), delta_x=int(delta_x))
 
 
 async def drag_here(tool_context: ToolContext, dx: int, dy: int, steps: int = 30) -> dict:
     """
     Drag starting at current cursor position by (dx,dy) in viewport pixels.
     """
-    pos = await _cursor_screen_to_viewport(tool_context)
-    if pos is None:
+    cur = _get_cursor_from_state(tool_context)
+    if cur is None:
         return {"ok": False, "error": "No cursor in session state yet."}
 
-    x1, y1 = pos
-    x2, y2 = x1 + int(dx), y1 + int(dy)
-    return await drag(x1, y1, x2, y2, steps=int(steps))
+    return await drag_screen_point_by_offset(cur[0], cur[1], dx=int(dx), dy=int(dy), steps=int(steps))

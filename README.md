@@ -2,6 +2,14 @@
 
 A voice-first Gemini ADK agent with Playwright browser tools and pointer-aware "here" actions.
 
+## Runtime Split
+
+The project now supports a cloud-orchestrated runtime:
+
+- Cloud Run hosts the FastAPI + ADK orchestrator.
+- The local client still owns mic/speaker, cursor tracking, and the visible Playwright browser.
+- Browser actions are forwarded over the existing WebSocket as `tool_call` / `tool_result` JSON messages.
+
 ## Setup
 
 ```bash
@@ -22,6 +30,21 @@ export GOOGLE_API_KEY="YOUR_API_KEY"
 ```bash
 uvicorn app.server:app --host 127.0.0.1 --port 8000
 ```
+
+For local client development, keep using `requirements.txt`.
+
+For Cloud Run builds, use the dedicated server dependency set in `requirements-cloud.txt`.
+
+Example deploy:
+
+```bash
+gcloud run deploy adk-agent-orchestrator \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated
+```
+
+Set `GOOGLE_API_KEY` in the Cloud Run service configuration before invoking the orchestrator remotely.
 
 ## Phase 1: Standalone Webcam Cursor (no voice required)
 
@@ -84,7 +107,7 @@ Current topology:
 Responsibilities:
 
 - `concierge`: handles top-level voice interaction and delegates browser requests.
-- `browser_agent`: executes Playwright tools (`navigate`, `click_here`, `scroll_here`, `drag_here`, `pan`) and directly handles pointer-aware "here" actions via shared cursor state.
+- `browser_agent`: runs in the orchestrator and forwards browser actions to the local executor (`navigate`, `click_here`, `scroll_here`, `drag_here`, `pan`).
 
 ## Protocol
 
@@ -102,3 +125,28 @@ Cursor payload supports required + optional fields:
 ```
 
 Server only requires `type/x/y`; optional fields are accepted for forward compatibility.
+
+Tool bridge payloads:
+
+```json
+{
+  "type": "tool_call",
+  "call_id": "uuid",
+  "tool": "navigate",
+  "args": {
+    "url": "https://maps.google.com"
+  }
+}
+```
+
+```json
+{
+  "type": "tool_result",
+  "call_id": "uuid",
+  "ok": true,
+  "result": {
+    "url": "https://maps.google.com",
+    "title": "Google Maps"
+  }
+}
+```

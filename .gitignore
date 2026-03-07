@@ -22,6 +22,8 @@ ENV/
 # Environment variables
 .env
 .env.*
+**/.env
+**/.env.*
 
 # pytest
 .pytest_cache/
@@ -50,3 +52,6 @@ tmp/
 
 # local files
 notes.txt
+
+# scripts
+scripts/

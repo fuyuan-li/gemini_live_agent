@@ -1,0 +1,14 @@
+.git
+.gitignore
+.pytest_cache
+.venv
+__pycache__
+*.pyc
+.env
+**/.env
+**/.env.*
+tests
+client/models
+notes.txt
+**/notes.txt
+scripts/use-adk-agent.sh

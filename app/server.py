@@ -18,6 +18,7 @@ from app.state.realtime_pointer import set_cursor
 from .agents import root_agent
 from app.runtime.genai_ws_sniffer import record_outbound, get_last_outbound
 from app.runtime.cursor_payload import parse_cursor_payload
+from app.runtime.session_bridge import register_bridge, unregister_bridge, handle_tool_result
 
 load_dotenv()
 
@@ -53,6 +54,7 @@ runner = Runner(
 @app.websocket("/ws/{user_id}/{session_id}")
 async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
     await websocket.accept()
+    bridge = await register_bridge(user_id=user_id, session_id=session_id, websocket=websocket)
 
     # Create or get session
     session = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
@@ -102,6 +104,10 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 except Exception:
                     continue
 
+                if payload.get("type") == "tool_result":
+                    await handle_tool_result(user_id=user_id, session_id=session_id, payload=payload)
+                    continue
+
                 pos = parse_cursor_payload(payload)
                 if pos is not None:
                     x_i, y_i = pos
@@ -138,7 +144,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                     mt = part.inline_data.mime_type
                     data = part.inline_data.data
                     if mt and mt.startswith("audio/pcm") and data is not None:
-                        await websocket.send_bytes(data)
+                        await bridge.send_bytes(data)
 
         except APIError as e:
             # This is the key "PRINT PRINT PRINT"
@@ -166,3 +172,4 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
 
     finally:
         queue.close()
+        await unregister_bridge(user_id=user_id, session_id=session_id, bridge=bridge)
