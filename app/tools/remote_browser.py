@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from time import time
 from typing import Any, Dict
+from uuid import uuid4
 
 from google.adk.tools.tool_context import ToolContext
 
-from app.runtime.session_bridge import call_local_tool
+from app.runtime.session_bridge import call_local_tool, emit_server_trace
 
 
 def _get_uid_sid(tc: ToolContext) -> tuple[str, str]:
@@ -20,7 +22,52 @@ def _get_uid_sid(tc: ToolContext) -> tuple[str, str]:
 
 async def _call(tool_context: ToolContext, tool_name: str, args: Dict[str, Any]) -> dict:
     user_id, session_id = _get_uid_sid(tool_context)
-    return await call_local_tool(user_id=user_id, session_id=session_id, tool=tool_name, args=args)
+    request_id = str(uuid4())
+    t0 = time()
+    await emit_server_trace(
+        user_id=user_id,
+        session_id=session_id,
+        request_id=request_id,
+        event="agent_started",
+        status="started",
+        summary=f"browser_agent handling {tool_name}",
+        agent_name="browser_agent",
+        tool_name=tool_name,
+    )
+    try:
+        result = await call_local_tool(
+            user_id=user_id,
+            session_id=session_id,
+            tool=tool_name,
+            args=args,
+            request_id=request_id,
+            agent_name="browser_agent",
+        )
+    except Exception as exc:
+        await emit_server_trace(
+            user_id=user_id,
+            session_id=session_id,
+            request_id=request_id,
+            event="agent_finished",
+            status="error",
+            summary=str(exc),
+            agent_name="browser_agent",
+            tool_name=tool_name,
+            duration_ms=int((time() - t0) * 1000),
+        )
+        raise
+    await emit_server_trace(
+        user_id=user_id,
+        session_id=session_id,
+        request_id=request_id,
+        event="agent_finished",
+        status="ok",
+        summary=f"browser_agent completed {tool_name}",
+        agent_name="browser_agent",
+        tool_name=tool_name,
+        duration_ms=int((time() - t0) * 1000),
+    )
+    return result
 
 
 async def remote_navigate(tool_context: ToolContext, url: str) -> dict:

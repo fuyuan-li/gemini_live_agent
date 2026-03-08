@@ -67,6 +67,7 @@ class HandCursorProvider:
         tracker_start_timeout_s: float = 8.0,
         mirror: bool = True,
         preview: bool = True,
+        preview_window: bool = True,
         overlay: bool = True,
         overlay_radius: int = 10,
         tracker: Optional[WebcamFingerTracker] = None,
@@ -77,6 +78,7 @@ class HandCursorProvider:
             camera_index=camera_index,
             mirror=mirror,
             preview_enabled=preview,
+            preview_window_enabled=preview_window,
         )
         self.mapper = mapper or CursorMapper(
             smoothing=smoothing,
@@ -234,6 +236,7 @@ class HandCursorProvider:
             "last_seen_ts": health.last_seen_ts,
             "frames_seen": health.frames_seen,
             "preview_enabled": bool(self.tracker.preview_enabled),
+            "preview_window_enabled": bool(getattr(self.tracker, "preview_window_enabled", True)),
             "overlay_enabled": self.overlay is not None,
             "calibrated": self.mapper.has_calibration(),
         }

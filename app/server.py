@@ -1,6 +1,7 @@
 # app/server.py
 import asyncio
 import json
+import os
 import time
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
@@ -16,14 +17,24 @@ import traceback
 
 from app.state.realtime_pointer import set_cursor
 from .agents import root_agent
+from app.live.trace import log_trace_event, make_cursor_ack
 from app.runtime.genai_ws_sniffer import record_outbound, get_last_outbound
 from app.runtime.cursor_payload import parse_cursor_payload
-from app.runtime.session_bridge import register_bridge, unregister_bridge, handle_tool_result
+from app.runtime.session_bridge import (
+    emit_server_trace,
+    handle_tool_result,
+    register_bridge,
+    send_session_meta,
+    unregister_bridge,
+)
 
 load_dotenv()
 
 APP_NAME = "live_voice_agent"
 INPUT_MIME = "audio/pcm;rate=16000"
+SERVICE_NAME = os.getenv("K_SERVICE", "local-dev")
+SERVICE_REVISION = os.getenv("K_REVISION", "local-revision")
+GIT_COMMIT_SHA = os.getenv("GIT_COMMIT_SHA", "unknown")
 
 def install_websockets_send_sniffer():
     import websockets.asyncio.connection as conn_mod
@@ -55,6 +66,22 @@ runner = Runner(
 async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
     await websocket.accept()
     bridge = await register_bridge(user_id=user_id, session_id=session_id, websocket=websocket)
+    await send_session_meta(
+        user_id=user_id,
+        session_id=session_id,
+        service=SERVICE_NAME,
+        revision=SERVICE_REVISION,
+        commit=GIT_COMMIT_SHA,
+    )
+    await emit_server_trace(
+        user_id=user_id,
+        session_id=session_id,
+        request_id=session_id,
+        event="session_connected",
+        status="ok",
+        summary=f"connected to {SERVICE_NAME}@{SERVICE_REVISION}",
+        agent_name=root_agent.name,
+    )
 
     # Create or get session
     session = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
@@ -82,6 +109,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
           - text frames: JSON control messages (cursor updates)
         """
         try:
+            last_cursor_trace_ts = 0.0
             while True:
                 msg = await websocket.receive()
 
@@ -112,14 +140,28 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 if pos is not None:
                     x_i, y_i = pos
 
-                    # print("[cursor] recv", x_i, y_i, "sid=", session_id, "uid=", user_id)
                     await set_cursor(user_id=user_id, session_id=session_id, x=x_i, y=y_i)
-
-                    # s2 = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
-                    # if s2:
-                    #     print("[cursor] after append, session.state.cursor =", (s2.state or {}).get("cursor"))
-                    # else:
-                    #     print("[cursor] after append, session not found")
+                    request_id = f"cursor:{payload.get('client_msg_id', 'na')}"
+                    await bridge.send_json(
+                        make_cursor_ack(
+                            session_id=session_id,
+                            request_id=request_id,
+                            x=x_i,
+                            y=y_i,
+                        )
+                    )
+                    now = time.time()
+                    if now - last_cursor_trace_ts >= 0.5:
+                        await emit_server_trace(
+                            user_id=user_id,
+                            session_id=session_id,
+                            request_id=request_id,
+                            event="cursor_received",
+                            status="ok",
+                            summary=f"cursor=({x_i},{y_i})",
+                            cursor={"x": x_i, "y": y_i},
+                        )
+                        last_cursor_trace_ts = now
 
         except WebSocketDisconnect:
             pass
@@ -149,6 +191,15 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
         except APIError as e:
             # This is the key "PRINT PRINT PRINT"
             last = get_last_outbound()
+            await emit_server_trace(
+                user_id=user_id,
+                session_id=session_id,
+                request_id=session_id,
+                event="session_error",
+                status="error",
+                summary=f"APIError status={getattr(e, 'status_code', None)} {e}",
+                agent_name=root_agent.name,
+            )
             print(f"[downstream] APIError: status_code={getattr(e, 'status_code', None)} message={e}")
             print(f"[downstream] LAST OUTBOUND (server->Gemini): {last}")
             traceback.print_exc()
@@ -157,6 +208,15 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
 
         except Exception as e:
             last = get_last_outbound()
+            await emit_server_trace(
+                user_id=user_id,
+                session_id=session_id,
+                request_id=session_id,
+                event="session_error",
+                status="error",
+                summary=f"{type(e).__name__}: {e}",
+                agent_name=root_agent.name,
+            )
             print(f"[downstream] Unexpected exception: {type(e).__name__}: {e}")
             print(f"[downstream] LAST OUTBOUND (server->Gemini): {last}")
             traceback.print_exc()
@@ -171,5 +231,20 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 print(f"[ws] task#{i} exception: {type(r).__name__}: {r}")
 
     finally:
+        event = {
+            "event_id": f"disconnect-{session_id}",
+            "request_id": session_id,
+            "session_id": session_id,
+            "source": "server",
+            "event": "session_disconnected",
+            "status": "ok",
+            "summary": "websocket disconnected",
+            "ts": time.time(),
+        }
+        log_trace_event(event)
+        try:
+            await bridge.send_json({"type": "trace_event", **event})
+        except Exception:
+            pass
         queue.close()
         await unregister_bridge(user_id=user_id, session_id=session_id, bridge=bridge)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Any, Deque, Dict, Optional, Set
+from typing import Any, Callable, Deque, Dict, Optional, Set
 
 from app.tools.browser.mouse import (
     click_screen_point,
@@ -15,9 +15,18 @@ from client.ws_guard import WSSender
 
 
 class LocalToolExecutor:
-    def __init__(self, provider: CursorProvider, sender: WSSender) -> None:
+    def __init__(
+        self,
+        provider: Optional[CursorProvider],
+        sender: WSSender,
+        *,
+        cursor_supplier: Optional[Callable[[], Optional[tuple[int, int]]]] = None,
+        event_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ) -> None:
         self.provider = provider
         self.sender = sender
+        self.cursor_supplier = cursor_supplier
+        self.event_callback = event_callback
         self._recent_ids: Deque[str] = deque(maxlen=256)
         self._recent_id_set: Set[str] = set()
 
@@ -42,9 +51,27 @@ class LocalToolExecutor:
             return True
 
         try:
+            self._emit(
+                {
+                    "event": "tool_result_received",
+                    "status": "started",
+                    "summary": f"local executor handling {tool}",
+                    "tool_name": tool,
+                    "request_id": call_id,
+                }
+            )
             result = await self._dispatch(tool, args)
         except Exception as exc:
             await self._send_error(call_id, str(exc))
+            self._emit(
+                {
+                    "event": "tool_result_received",
+                    "status": "error",
+                    "summary": str(exc),
+                    "tool_name": tool,
+                    "request_id": call_id,
+                }
+            )
         else:
             await self.sender.send_json(
                 "tool_result",
@@ -54,6 +81,15 @@ class LocalToolExecutor:
                     "ok": True,
                     "result": result,
                 },
+            )
+            self._emit(
+                {
+                    "event": "tool_result_received",
+                    "status": "ok",
+                    "summary": str(result),
+                    "tool_name": tool,
+                    "request_id": call_id,
+                }
             )
 
         self._remember_call_id(call_id)
@@ -99,6 +135,14 @@ class LocalToolExecutor:
         raise RuntimeError(f"Unknown tool: {tool}")
 
     def _get_cursor_xy(self) -> tuple[int, int]:
+        if self.cursor_supplier is not None:
+            cur = self.cursor_supplier()
+            if cur is None:
+                raise RuntimeError("No local cursor position is available yet.")
+            return int(cur[0]), int(cur[1])
+
+        if self.provider is None:
+            raise RuntimeError("No cursor provider is configured.")
         self.provider.pump_ui()
         cur = self.provider.get_cursor()
         if cur is None:
@@ -126,3 +170,8 @@ class LocalToolExecutor:
 
         self._recent_ids.append(call_id)
         self._recent_id_set.add(call_id)
+
+    def _emit(self, payload: dict[str, Any]) -> None:
+        if self.event_callback is None:
+            return
+        self.event_callback(payload)

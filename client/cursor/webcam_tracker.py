@@ -45,6 +45,7 @@ class WebcamFingerTracker:
         camera_index: int = 0,
         mirror: bool = True,
         preview_enabled: bool = True,
+        preview_window_enabled: bool = True,
         min_detection_confidence: float = 0.6,
         min_tracking_confidence: float = 0.5,
         index_tip_id: int = 8,
@@ -55,6 +56,7 @@ class WebcamFingerTracker:
         self.camera_index = int(camera_index)
         self.mirror = bool(mirror)
         self.preview_enabled = bool(preview_enabled)
+        self.preview_window_enabled = bool(preview_window_enabled)
 
         self.min_detection_confidence = float(min_detection_confidence)
         self.min_tracking_confidence = float(min_tracking_confidence)
@@ -136,6 +138,10 @@ class WebcamFingerTracker:
 
     def pump_preview(self) -> None:
         if not self.preview_enabled:
+            if self._preview_window_open:
+                self.close_preview_window()
+            return
+        if not self.preview_window_enabled:
             if self._preview_window_open:
                 self.close_preview_window()
             return

@@ -98,6 +98,21 @@ Useful options:
 - `--hand-smoothing 0.35`
 - `--hand-overlay-radius 10`
 
+## Companion App
+
+For hackathon demo mode, run the native macOS companion window instead of the CLI:
+
+```bash
+python client/companion_app.py --ws-url wss://YOUR-CLOUD-RUN-SERVICE/ws/local_user/local_session
+```
+
+What it does:
+
+- opens a local companion window with live preview + trace timeline
+- keeps the system overlay dot for "here" interactions
+- auto-connects to the live session and starts streaming mic audio
+- renders Cloud Run service / revision / commit metadata from server-side `session_meta`
+
 ## Agent Topology
 
 Current topology:

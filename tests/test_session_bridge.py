@@ -40,8 +40,10 @@ def test_call_local_tool_round_trip() -> None:
             )
             await asyncio.sleep(0)
 
-            assert len(ws.text_frames) == 1
-            sent = ws.text_frames[0]
+            assert len(ws.text_frames) == 2
+            assert ws.text_frames[0]["type"] == "trace_event"
+            assert ws.text_frames[0]["event"] == "tool_called"
+            sent = ws.text_frames[1]
             assert sent["type"] == "tool_call"
             assert sent["tool"] == "navigate"
             assert sent["args"] == {"url": "https://example.com"}
@@ -60,6 +62,9 @@ def test_call_local_tool_round_trip() -> None:
 
             result = await task
             assert result == {"ok": True, "url": "https://example.com"}
+            assert ws.text_frames[2]["type"] == "trace_event"
+            assert ws.text_frames[2]["event"] == "tool_finished"
+            assert ws.text_frames[2]["status"] == "ok"
         finally:
             await unregister_bridge("user", "session", bridge)
 

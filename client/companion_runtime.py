@@ -1,0 +1,265 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import threading
+from typing import Optional
+
+import sounddevice as sd
+import websockets
+
+from client.companion_state import CompanionState
+from client.cursor.provider import HandCursorProvider
+from client.local_executor import LocalToolExecutor
+from client.ws_guard import OutboundTelemetry, WSSender
+
+
+IN_RATE = 16000
+OUT_RATE = 24000
+CHANNELS_IN = 1
+CHANNELS_OUT = 1
+DTYPE = "int16"
+CHUNK_MS = 100
+CHUNK_SAMPLES = int(IN_RATE * CHUNK_MS / 1000)
+RECONNECT_DELAY_S = 2.0
+
+
+class CompanionRuntime:
+    def __init__(
+        self,
+        *,
+        ws_url: str,
+        provider: HandCursorProvider,
+        state: CompanionState,
+        cursor_send_hz: float = 20.0,
+    ) -> None:
+        self.ws_url = ws_url
+        self.provider = provider
+        self.state = state
+        self.cursor_send_hz = float(max(1.0, cursor_send_hz))
+        self.cursor_source = str(self.provider.status().get("source", "hand"))
+
+        self._thread: Optional[threading.Thread] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._stop_evt = threading.Event()
+        self._stop_async: Optional[asyncio.Event] = None
+        self._reconnect_async: Optional[asyncio.Event] = None
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self.state.record_local_event(
+            request_id=self.state.session_id,
+            event="camera_started",
+            status="ok",
+            summary="camera tracker started",
+        )
+        self._stop_evt.clear()
+        self._thread = threading.Thread(target=self._thread_main, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_evt.set()
+        if self._loop is not None and self._stop_async is not None:
+            self._loop.call_soon_threadsafe(self._stop_async.set)
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=3.0)
+        self.state.set_connected(False)
+
+    def toggle_mute(self) -> bool:
+        muted = self.state.toggle_muted()
+        self.state.record_local_event(
+            request_id=self.state.session_id,
+            event="audio_stream_muted" if muted else "audio_stream_unmuted",
+            status="ok",
+            summary="muted" if muted else "unmuted",
+        )
+        return muted
+
+    def request_reconnect(self) -> None:
+        self.state.record_local_event(
+            request_id=self.state.session_id,
+            event="session_reconnect_requested",
+            status="ok",
+            summary="manual reconnect requested",
+        )
+        if self._loop is not None and self._reconnect_async is not None:
+            self._loop.call_soon_threadsafe(self._reconnect_async.set)
+
+    def poll_capture(self) -> None:
+        self.provider.pump_ui()
+        cursor = self.provider.get_cursor()
+        fingertip = self.provider.tracker.get_latest_sample()
+        self.state.update_local_capture(cursor=cursor, fingertip=fingertip)
+
+    def get_preview_frame(self):
+        return self.provider.tracker.get_preview_frame()
+
+    def _thread_main(self) -> None:
+        asyncio.run(self._run_forever())
+
+    async def _run_forever(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        self._stop_async = asyncio.Event()
+        self._reconnect_async = asyncio.Event()
+        while not self._stop_evt.is_set():
+            telemetry = OutboundTelemetry()
+            try:
+                async with websockets.connect(
+                    self.ws_url,
+                    max_size=None,
+                    ping_interval=20,
+                    ping_timeout=20,
+                ) as ws:
+                    self.state.set_connected(True)
+                    self.state.record_local_event(
+                        request_id=self.state.session_id,
+                        event="session_connected",
+                        status="ok",
+                        summary="companion connected",
+                        agent_name="concierge",
+                    )
+                    self._reconnect_async.clear()
+                    sender = WSSender(ws, telemetry)
+                    executor = LocalToolExecutor(
+                        provider=None,
+                        sender=sender,
+                        cursor_supplier=self.state.get_local_cursor_xy,
+                        event_callback=self._executor_event_callback,
+                    )
+                    tasks = [
+                        asyncio.create_task(self._mic_sender(sender)),
+                        asyncio.create_task(self._receiver_loop(ws, executor)),
+                        asyncio.create_task(self._cursor_sender(sender)),
+                        asyncio.create_task(self._reconnect_watcher(ws)),
+                    ]
+                    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                    for task in pending:
+                        task.cancel()
+                    for task in done:
+                        if task.cancelled():
+                            continue
+                        exc = task.exception()
+                        if exc is not None and not isinstance(exc, asyncio.CancelledError):
+                            raise exc
+            except (OSError, websockets.exceptions.ConnectionClosed) as exc:
+                self.state.record_local_event(
+                    request_id=self.state.session_id,
+                    event="session_error",
+                    status="error",
+                    summary=f"{type(exc).__name__}: {exc}",
+                )
+                self.state.set_connected(False)
+                if self._stop_evt.is_set():
+                    break
+                await asyncio.sleep(RECONNECT_DELAY_S)
+            finally:
+                self.state.record_local_event(
+                    request_id=self.state.session_id,
+                    event="session_disconnected",
+                    status="ok",
+                    summary="companion disconnected",
+                )
+                self.state.set_connected(False)
+            if self._stop_evt.is_set():
+                break
+
+    async def _reconnect_watcher(self, ws: websockets.ClientConnection) -> None:
+        assert self._reconnect_async is not None
+        assert self._stop_async is not None
+        reconnect_task = asyncio.create_task(self._reconnect_async.wait())
+        stop_task = asyncio.create_task(self._stop_async.wait())
+        done, pending = await asyncio.wait(
+            [reconnect_task, stop_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        for task in done:
+            task.result()
+        await ws.close()
+
+    async def _cursor_sender(self, sender: WSSender) -> None:
+        interval = 1.0 / self.cursor_send_hz
+        while not self._stop_evt.is_set():
+            snapshot = self.state.snapshot()
+            if snapshot.local_cursor is not None:
+                payload = {
+                    "type": "cursor",
+                    "x": snapshot.local_cursor.x,
+                    "y": snapshot.local_cursor.y,
+                    "source": self.cursor_source,
+                    "ts": snapshot.local_cursor.ts,
+                }
+                msg_id = await sender.send_json("cursor", payload)
+                self.state.maybe_record_cursor_sent(
+                    request_id=f"cursor:{msg_id}",
+                    cursor=snapshot.local_cursor,
+                )
+            await asyncio.sleep(interval)
+
+    async def _mic_sender(self, sender: WSSender) -> None:
+        q: asyncio.Queue[bytes] = asyncio.Queue()
+
+        def callback(indata, frames, time_info, status) -> None:
+            if status:
+                return
+            q.put_nowait(bytes(indata))
+
+        with sd.RawInputStream(
+            samplerate=IN_RATE,
+            channels=CHANNELS_IN,
+            dtype=DTYPE,
+            blocksize=CHUNK_SAMPLES,
+            callback=callback,
+        ):
+            self.state.record_local_event(
+                request_id=self.state.session_id,
+                event="audio_stream_started",
+                status="ok",
+                summary="microphone streaming started",
+                agent_name="concierge",
+            )
+            while not self._stop_evt.is_set():
+                try:
+                    chunk = await asyncio.wait_for(q.get(), timeout=0.25)
+                except asyncio.TimeoutError:
+                    continue
+                if self.state.snapshot().muted:
+                    continue
+                await sender.send_bytes("mic_chunk", chunk)
+
+    async def _receiver_loop(
+        self,
+        ws: websockets.ClientConnection,
+        executor: LocalToolExecutor,
+    ) -> None:
+        with sd.RawOutputStream(
+            samplerate=OUT_RATE,
+            channels=CHANNELS_OUT,
+            dtype=DTYPE,
+            blocksize=0,
+        ) as out:
+            async for msg in ws:
+                if isinstance(msg, bytes) and msg:
+                    out.write(msg)
+                    continue
+                if not isinstance(msg, str):
+                    continue
+                try:
+                    payload = json.loads(msg)
+                except Exception:
+                    continue
+                if self.state.handle_server_message(payload):
+                    continue
+                await executor.handle_message(payload)
+
+    def _executor_event_callback(self, payload: dict[str, object]) -> None:
+        self.state.record_local_event(
+            request_id=str(payload.get("request_id", self.state.session_id)),
+            event=str(payload.get("event", "tool_result_received")),
+            status=str(payload.get("status", "ok")),
+            summary=str(payload.get("summary", "")),
+            tool_name=str(payload["tool_name"]) if payload.get("tool_name") else None,
+            agent_name=str(payload["agent_name"]) if payload.get("agent_name") else None,
+        )

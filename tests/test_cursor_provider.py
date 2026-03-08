@@ -13,6 +13,7 @@ class FakeTracker:
         self.running = False
         self.latest: Optional[NormalizedSample] = None
         self.preview_enabled = True
+        self.preview_window_enabled = True
 
     def start(self, timeout_s: float = 3.0) -> bool:
         self.running = self.should_start
@@ -92,6 +93,7 @@ def test_hand_provider_start_fails_when_tracker_fails() -> None:
 
 def test_hand_provider_status_reports_preview_flag() -> None:
     tracker = FakeTracker(should_start=True)
+    tracker.preview_window_enabled = False
     provider = HandCursorProvider(tracker=tracker, overlay_ui=FakeOverlay())
 
     assert provider.start() is True
@@ -99,3 +101,4 @@ def test_hand_provider_status_reports_preview_flag() -> None:
     provider.stop()
 
     assert status["preview_enabled"] is True
+    assert status["preview_window_enabled"] is False
