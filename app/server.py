@@ -18,7 +18,7 @@ import traceback
 
 from app.state.realtime_pointer import set_cursor
 from .agents import root_agent
-from app.live.trace import log_trace_event, make_cursor_ack
+from app.live.trace import log_trace_event, make_cursor_ack, parse_trace_payload
 from app.runtime.genai_ws_sniffer import get_last_outbound, get_recent_outbound, record_outbound
 from app.runtime.cursor_payload import parse_cursor_payload
 from app.runtime.session_bridge import (
@@ -171,6 +171,22 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                         f"user={user_id} session={session_id} call_id={payload.get('call_id')} ok={payload.get('ok')}"
                     )
                     await handle_tool_result(user_id=user_id, session_id=session_id, payload=payload)
+                    continue
+
+                client_trace = parse_trace_payload(
+                    payload,
+                    expected_type="client_trace",
+                    expected_source="client",
+                    expected_session_id=session_id,
+                )
+                if client_trace is not None:
+                    log_trace_event(client_trace)
+                    continue
+                if payload.get("type") == "client_trace":
+                    _cloud_info(
+                        "[upstream.client_trace] dropped invalid client trace "
+                        f"user={user_id} session={session_id} keys={list(payload.keys())[:10]}"
+                    )
                     continue
 
                 pos = parse_cursor_payload(payload)

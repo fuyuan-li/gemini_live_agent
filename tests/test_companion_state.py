@@ -99,3 +99,22 @@ def test_companion_state_clears_stale_tool_on_agent_level_event() -> None:
 
     assert snapshot.current_agent == "concierge"
     assert snapshot.current_tool is None
+
+
+def test_companion_state_notifies_local_trace_listener_for_local_events() -> None:
+    state = CompanionState(session_id="sess-1")
+    seen: list[dict[str, object]] = []
+    state.set_local_trace_listener(lambda payload: seen.append(payload))
+
+    state.record_local_event(
+        request_id="req-9",
+        event="session_connected",
+        status="ok",
+        summary="connected",
+        agent_name="concierge",
+    )
+
+    assert len(seen) == 1
+    assert seen[0]["source"] == "client"
+    assert seen[0]["event"] == "session_connected"
+    assert seen[0]["agent_name"] == "concierge"

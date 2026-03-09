@@ -1,4 +1,12 @@
-from app.live.trace import build_trace_event, make_cursor_ack, make_session_meta, make_trace_message
+from app.live.trace import (
+    build_trace_event,
+    format_trace_event,
+    make_client_trace_message,
+    make_cursor_ack,
+    make_session_meta,
+    make_trace_message,
+    parse_trace_payload,
+)
 
 
 def test_trace_event_round_trip_message_shape() -> None:
@@ -24,6 +32,24 @@ def test_trace_event_round_trip_message_shape() -> None:
     assert message["request_id"] == "req-1"
     assert message["cursor"] == {"x": 1, "y": 2}
     assert message["metadata"] == {"display_id": 7}
+
+    client_message = make_client_trace_message(payload)
+    parsed = parse_trace_payload(
+        client_message,
+        expected_type="client_trace",
+        expected_source="server",
+        expected_session_id="sess-1",
+    )
+
+    assert client_message["type"] == "client_trace"
+    assert parsed is not None
+    assert parsed["event_id"] == "evt-1"
+
+    line = format_trace_event(payload)
+    assert line == (
+        "[trace][server] event=tool_called status=started rid=req-1 "
+        "agent=browser_agent tool=navigate summary=navigate https://example.com"
+    )
 
 
 def test_session_meta_and_cursor_ack_shape() -> None:

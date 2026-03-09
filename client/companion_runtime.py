@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from collections import deque
 from typing import Optional
 
 import sounddevice as sd
@@ -22,6 +23,18 @@ DTYPE = "int16"
 CHUNK_MS = 100
 CHUNK_SAMPLES = int(IN_RATE * CHUNK_MS / 1000)
 RECONNECT_DELAY_S = 2.0
+CLIENT_TRACE_EVENTS = {
+    "camera_started",
+    "session_connected",
+    "session_disconnected",
+    "session_error",
+    "audio_stream_started",
+    "audio_stream_muted",
+    "audio_stream_unmuted",
+    "session_reconnect_requested",
+    "tool_result_received",
+}
+CLIENT_TRACE_MAX_BACKLOG = 256
 
 
 class CompanionRuntime:
@@ -44,6 +57,9 @@ class CompanionRuntime:
         self._stop_evt = threading.Event()
         self._stop_async: Optional[asyncio.Event] = None
         self._reconnect_async: Optional[asyncio.Event] = None
+        self._client_trace_lock = threading.Lock()
+        self._pending_client_traces: deque[dict[str, object]] = deque(maxlen=CLIENT_TRACE_MAX_BACKLOG)
+        self.state.set_local_trace_listener(self._queue_client_trace)
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -131,6 +147,7 @@ class CompanionRuntime:
                         asyncio.create_task(self._mic_sender(sender)),
                         asyncio.create_task(self._receiver_loop(ws, executor)),
                         asyncio.create_task(self._cursor_sender(sender)),
+                        asyncio.create_task(self._client_trace_sender(sender)),
                         asyncio.create_task(self._reconnect_watcher(ws)),
                     ]
                     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -198,6 +215,14 @@ class CompanionRuntime:
                 )
             await asyncio.sleep(interval)
 
+    async def _client_trace_sender(self, sender: WSSender) -> None:
+        while not self._stop_evt.is_set():
+            payload = self._pop_next_client_trace()
+            if payload is None:
+                await asyncio.sleep(0.1)
+                continue
+            await sender.send_json("client_trace", {"type": "client_trace", **payload})
+
     async def _mic_sender(self, sender: WSSender) -> None:
         q: asyncio.Queue[bytes] = asyncio.Queue()
 
@@ -258,6 +283,20 @@ class CompanionRuntime:
         calibration_state = str(payload["calibration_state"]) if payload.get("calibration_state") else None
         if calibration_state is not None:
             self.state.set_calibration_state(calibration_state, str(payload.get("summary", "")))
+
+    def _queue_client_trace(self, payload: dict[str, object]) -> None:
+        if str(payload.get("source")) != "client":
+            return
+        if str(payload.get("event")) not in CLIENT_TRACE_EVENTS:
+            return
+        with self._client_trace_lock:
+            self._pending_client_traces.append(dict(payload))
+
+    def _pop_next_client_trace(self) -> Optional[dict[str, object]]:
+        with self._client_trace_lock:
+            if not self._pending_client_traces:
+                return None
+            return self._pending_client_traces.popleft()
         self.state.record_local_event(
             request_id=str(payload.get("request_id", self.state.session_id)),
             event=str(payload.get("event", "tool_result_received")),

@@ -4,7 +4,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Optional
+from typing import Any, Callable, Deque, Optional
 
 from app.live.trace import build_trace_event
 from client.cursor.types import CursorSample, NormalizedSample
@@ -75,6 +75,7 @@ class CompanionState:
         self._last_cursor_sent_trace = 0.0
         self._calibration_state = "uncalibrated"
         self._calibration_message = "Hand cursor calibration is required."
+        self._local_trace_listener: Optional[Callable[[dict[str, Any]], None]] = None
 
     def snapshot(self) -> CompanionSnapshot:
         with self._lock:
@@ -128,6 +129,10 @@ class CompanionState:
             self._calibration_state = str(state)
             self._calibration_message = str(message)
 
+    def set_local_trace_listener(self, listener: Optional[Callable[[dict[str, Any]], None]]) -> None:
+        with self._lock:
+            self._local_trace_listener = listener
+
     def record_local_event(
         self,
         *,
@@ -155,6 +160,14 @@ class CompanionState:
             metadata=metadata,
         )
         self._apply_event(payload)
+        listener: Optional[Callable[[dict[str, Any]], None]]
+        with self._lock:
+            listener = self._local_trace_listener
+        if listener is not None:
+            try:
+                listener(dict(payload))
+            except Exception:
+                pass
 
     def maybe_record_cursor_sent(self, *, request_id: str, cursor: CursorPoint) -> None:
         now = time.time()

@@ -78,6 +78,13 @@ def make_trace_message(event: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def make_client_trace_message(event: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "client_trace",
+        **dict(event),
+    }
+
+
 def make_session_meta(
     *,
     session_id: str,
@@ -114,5 +121,48 @@ def make_cursor_ack(
     }
 
 
+def parse_trace_payload(
+    payload: Mapping[str, Any],
+    *,
+    expected_type: str,
+    expected_source: Optional[str] = None,
+    expected_session_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    if payload.get("type") != expected_type:
+        return None
+
+    event = dict(payload)
+    event.pop("type", None)
+    event.pop("client_msg_id", None)
+
+    required = {
+        "event_id",
+        "request_id",
+        "session_id",
+        "source",
+        "event",
+        "status",
+        "summary",
+        "ts",
+    }
+    if not required.issubset(event.keys()):
+        return None
+    if expected_source is not None and str(event.get("source")) != expected_source:
+        return None
+    if expected_session_id is not None and str(event.get("session_id")) != expected_session_id:
+        return None
+    return event
+
+
+def format_trace_event(event: Mapping[str, Any]) -> str:
+    return (
+        f"[trace][{event.get('source', 'unknown')}] "
+        f"event={event.get('event')} status={event.get('status')} "
+        f"rid={event.get('request_id')} agent={event.get('agent_name')} "
+        f"tool={event.get('tool_name')} summary={event.get('summary', '')}"
+    )
+
+
 def log_trace_event(event: Mapping[str, Any]) -> None:
     logger.info(json.dumps({"trace_event": dict(event)}, ensure_ascii=False, sort_keys=True))
+    logger.info(format_trace_event(event))
