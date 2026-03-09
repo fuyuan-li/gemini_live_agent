@@ -159,7 +159,7 @@ class CompanionState:
     def maybe_record_cursor_sent(self, *, request_id: str, cursor: CursorPoint) -> None:
         now = time.time()
         with self._lock:
-            if now - self._last_cursor_sent_trace < 0.5:
+            if now - self._last_cursor_sent_trace < 1.0:
                 return
             self._last_cursor_sent_trace = now
         self.record_local_event(
@@ -216,15 +216,16 @@ class CompanionState:
             cursor=payload.get("cursor"),
             metadata=payload.get("metadata"),
         )
-        print(
-            f"[trace][{entry.source}] event={entry.event} status={entry.status} "
-            f"rid={entry.request_id} agent={entry.agent_name} tool={entry.tool_name} summary={entry.summary}"
-        )
+        if entry.event not in {"cursor_sent", "cursor_received"}:
+            print(
+                f"[trace][{entry.source}] event={entry.event} status={entry.status} "
+                f"rid={entry.request_id} agent={entry.agent_name} tool={entry.tool_name} summary={entry.summary}"
+            )
         with self._lock:
             self._latest_events.append(entry)
             if entry.agent_name:
                 self._current_agent = entry.agent_name
             if entry.tool_name:
                 self._current_tool = entry.tool_name
-            if entry.summary:
+            if entry.summary and entry.event not in {"cursor_sent", "cursor_received"}:
                 self._last_summary = entry.summary

@@ -221,3 +221,55 @@ def test_local_executor_returns_error_for_unknown_tool() -> None:
         assert "Unknown tool" in sender.sent[0][1]["error"]
 
     asyncio.run(scenario())
+
+
+def test_local_executor_prefers_cursor_supplier_over_provider(monkeypatch) -> None:
+    async def scenario() -> None:
+        sender = FakeSender()
+        provider = FakeProvider(
+            cursor=FakeCursor(111, 222),
+            source="hand",
+            calibrated=True,
+            calibration_display_id=1,
+        )
+        supplier_calls: list[int] = []
+
+        def cursor_supplier() -> tuple[int, int]:
+            supplier_calls.append(1)
+            return (333, 444)
+
+        executor = LocalToolExecutor(
+            provider=provider,
+            sender=sender,
+            cursor_supplier=cursor_supplier,
+        )
+
+        async def fake_click_screen_point(x: int, y: int, *, geometry=None) -> dict:
+            return {"ok": True, "x": x, "y": y}
+
+        async def fake_refresh_browser_geometry():
+            return FakeGeometry(
+                display_id=1,
+                viewport_origin=(10, 20),
+                viewport_size=(1280, 800),
+                window_bounds=FakeWindowBounds(left=0, top=0, width=1400, height=900),
+            )
+
+        monkeypatch.setattr(local_executor_mod, "click_screen_point", fake_click_screen_point)
+        monkeypatch.setattr(local_executor_mod, "refresh_browser_geometry", fake_refresh_browser_geometry)
+
+        handled = await executor.handle_message(
+            {
+                "type": "tool_call",
+                "call_id": "call-supplier",
+                "tool": "click_here",
+                "args": {},
+            }
+        )
+
+        assert handled is True
+        assert supplier_calls == [1]
+        assert provider.pumped == 0
+        assert sender.sent[0][1]["result"] == {"ok": True, "x": 333, "y": 444}
+
+    asyncio.run(scenario())

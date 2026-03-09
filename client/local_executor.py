@@ -159,17 +159,17 @@ class LocalToolExecutor:
         raise RuntimeError(f"Unknown tool: {tool}")
 
     def _get_cursor_xy(self) -> tuple[int, int]:
-        if self.provider is not None:
-            self.provider.pump_ui()
-            cur = self.provider.get_cursor()
-            if cur is not None:
-                return int(cur.x), int(cur.y)
-
         if self.cursor_supplier is not None:
             cur = self.cursor_supplier()
             if cur is None:
                 raise RuntimeError("No local cursor position is available yet.")
             return int(cur[0]), int(cur[1])
+
+        if self.provider is not None:
+            self.provider.pump_ui()
+            cur = self.provider.get_cursor()
+            if cur is not None:
+                return int(cur.x), int(cur.y)
 
         if self.provider is None:
             raise RuntimeError("No cursor provider is configured.")
