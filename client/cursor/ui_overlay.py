@@ -28,16 +28,37 @@ class _MacDotView(AppKit.NSView):  # type: ignore[misc, valid-type]
         AppKit.NSBezierPath.bezierPathWithOvalInRect_(dot_rect).fill()
 
 
-class ScreenDotOverlay:
-    """
-    Native macOS overlay that renders a small transparent floating dot.
-    """
+class _MacRingView(AppKit.NSView):  # type: ignore[misc, valid-type]
+    def initWithFrame_radius_(self, frame, radius: int):
+        self = objc.super(_MacRingView, self).initWithFrame_(frame)
+        if self is None:
+            return None
+        self._radius = int(radius)
+        return self
 
-    def __init__(
-        self,
-        radius: int = 10,
-        visible: bool = True,
-    ) -> None:
+    def isOpaque(self):
+        return False
+
+    def drawRect_(self, rect):
+        AppKit.NSColor.clearColor().set()
+        AppKit.NSRectFill(rect)
+
+        stroke = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(0.18, 0.96, 0.92, 0.98)
+        fill = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(0.18, 0.96, 0.92, 0.14)
+        size = self._radius * 2
+        ring_rect = AppKit.NSMakeRect(3, 3, size - 6, size - 6)
+
+        fill.set()
+        AppKit.NSBezierPath.bezierPathWithOvalInRect_(ring_rect).fill()
+
+        path = AppKit.NSBezierPath.bezierPathWithOvalInRect_(ring_rect)
+        path.setLineWidth_(5.0)
+        stroke.set()
+        path.stroke()
+
+
+class _BaseScreenOverlay:
+    def __init__(self, *, radius: int, visible: bool) -> None:
         self.radius = int(max(4, radius))
         self._visible = bool(visible)
 
@@ -49,6 +70,9 @@ class ScreenDotOverlay:
         self._running = False
         self._x = 0
         self._y = 0
+
+    def _build_view(self, rect):
+        raise NotImplementedError
 
     def start(self) -> bool:
         if threading.current_thread() is not threading.main_thread():
@@ -77,7 +101,7 @@ class ScreenDotOverlay:
                 | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary
             )
 
-            view = _MacDotView.alloc().initWithFrame_radius_(rect, self.radius)
+            view = self._build_view(rect)
             window.setContentView_(view)
 
             if self._visible:
@@ -169,3 +193,35 @@ class ScreenDotOverlay:
 
     def get_last_error(self) -> Optional[str]:
         return self._last_error
+
+
+class ScreenDotOverlay(_BaseScreenOverlay):
+    """
+    Native macOS overlay that renders a small transparent floating dot.
+    """
+
+    def __init__(
+        self,
+        radius: int = 10,
+        visible: bool = True,
+    ) -> None:
+        super().__init__(radius=radius, visible=visible)
+
+    def _build_view(self, rect):
+        return _MacDotView.alloc().initWithFrame_radius_(rect, self.radius)
+
+
+class ScreenTargetOverlay(_BaseScreenOverlay):
+    """
+    Native macOS overlay that renders a larger translucent calibration ring.
+    """
+
+    def __init__(
+        self,
+        radius: int = 48,
+        visible: bool = False,
+    ) -> None:
+        super().__init__(radius=radius, visible=visible)
+
+    def _build_view(self, rect):
+        return _MacRingView.alloc().initWithFrame_radius_(rect, self.radius)
