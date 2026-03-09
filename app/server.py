@@ -42,6 +42,11 @@ CURSOR_TRACE_MIN_DELTA_PX = int(os.getenv("CURSOR_TRACE_MIN_DELTA_PX", "24"))
 EXPECTED_AUDIO_CHUNK_BYTES = 3200
 logger = logging.getLogger("app.server.live")
 
+
+def _cloud_info(message: str) -> None:
+    logger.info(message)
+    print(message)
+
 def install_websockets_send_sniffer():
     import websockets.asyncio.connection as conn_mod
     Connection = conn_mod.Connection
@@ -72,15 +77,11 @@ runner = Runner(
 async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
     await websocket.accept()
     bridge = await register_bridge(user_id=user_id, session_id=session_id, websocket=websocket)
-    logger.info(
-        "[session] accepted ws user=%s session=%s service=%s revision=%s commit=%s model=%s input_mime=%s",
-        user_id,
-        session_id,
-        SERVICE_NAME,
-        SERVICE_REVISION,
-        GIT_COMMIT_SHA,
-        getattr(root_agent, "model", "unknown"),
-        INPUT_MIME,
+    _cloud_info(
+        "[session] accepted ws "
+        f"user={user_id} session={session_id} service={SERVICE_NAME} "
+        f"revision={SERVICE_REVISION} commit={GIT_COMMIT_SHA} "
+        f"model={getattr(root_agent, 'model', 'unknown')} input_mime={INPUT_MIME}"
     )
     await send_session_meta(
         user_id=user_id,
@@ -139,22 +140,16 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                     audio_chunk_count += 1
                     audio_bytes_total += len(b)
                     if len(b) != EXPECTED_AUDIO_CHUNK_BYTES:
-                        logger.warning(
-                            "[upstream.audio] unusual chunk size user=%s session=%s chunk=%s bytes=%s expected=%s",
-                            user_id,
-                            session_id,
-                            audio_chunk_count,
-                            len(b),
-                            EXPECTED_AUDIO_CHUNK_BYTES,
+                        _cloud_info(
+                            "[upstream.audio] unusual chunk size "
+                            f"user={user_id} session={session_id} chunk={audio_chunk_count} "
+                            f"bytes={len(b)} expected={EXPECTED_AUDIO_CHUNK_BYTES}"
                         )
                     elif audio_chunk_count == 1 or audio_chunk_count % AUDIO_LOG_EVERY_CHUNKS == 0:
-                        logger.info(
-                            "[upstream.audio] user=%s session=%s chunks=%s total_bytes=%s last_chunk=%s",
-                            user_id,
-                            session_id,
-                            audio_chunk_count,
-                            audio_bytes_total,
-                            len(b),
+                        _cloud_info(
+                            "[upstream.audio] "
+                            f"user={user_id} session={session_id} chunks={audio_chunk_count} "
+                            f"total_bytes={audio_bytes_total} last_chunk={len(b)}"
                         )
                     blob = types.Blob(mime_type=INPUT_MIME, data=b)
                     queue.send_realtime(blob)
@@ -171,12 +166,9 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                     continue
 
                 if payload.get("type") == "tool_result":
-                    logger.info(
-                        "[upstream.tool_result] user=%s session=%s call_id=%s ok=%s",
-                        user_id,
-                        session_id,
-                        payload.get("call_id"),
-                        payload.get("ok"),
+                    _cloud_info(
+                        "[upstream.tool_result] "
+                        f"user={user_id} session={session_id} call_id={payload.get('call_id')} ok={payload.get('ok')}"
                     )
                     await handle_tool_result(user_id=user_id, session_id=session_id, payload=payload)
                     continue
@@ -215,15 +207,13 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                         last_logged_cursor = (x_i, y_i)
                     continue
 
-                logger.info(
-                    "[upstream.text] user=%s session=%s ignored payload keys=%s",
-                    user_id,
-                    session_id,
-                    list(payload.keys())[:8],
+                _cloud_info(
+                    "[upstream.text] "
+                    f"user={user_id} session={session_id} ignored payload keys={list(payload.keys())[:8]}"
                 )
 
         except WebSocketDisconnect:
-            logger.info("[session] upstream disconnect user=%s session=%s", user_id, session_id)
+            _cloud_info(f"[session] upstream disconnect user={user_id} session={session_id}")
             pass
 
     async def downstream() -> None:
@@ -232,12 +222,10 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
         Also print last outbound frame to Gemini when APIError happens (e.g., 1007).
         """
         try:
-            logger.info(
-                "[downstream] run_live start user=%s session=%s streaming_mode=%s response_modalities=%s",
-                user_id,
-                session_id,
-                StreamingMode.BIDI,
-                ["AUDIO"],
+            _cloud_info(
+                "[downstream] run_live start "
+                f"user={user_id} session={session_id} streaming_mode={StreamingMode.BIDI} "
+                "response_modalities=['AUDIO']"
             )
             output_chunk_count = 0
             output_bytes_total = 0
@@ -260,14 +248,10 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 if input_tx is not None:
                     input_text = str(getattr(input_tx, "text", "") or "").strip()
                     if input_text and input_text != last_input_transcript:
-                        logger.info(
-                            "[downstream.transcript.user] user=%s session=%s author=%s text=%r turn_complete=%s interrupted=%s",
-                            user_id,
-                            session_id,
-                            author,
-                            input_text,
-                            turn_complete,
-                            interrupted,
+                        _cloud_info(
+                            "[downstream.transcript.user] "
+                            f"user={user_id} session={session_id} author={author} "
+                            f"text={input_text!r} turn_complete={turn_complete} interrupted={interrupted}"
                         )
                         last_input_transcript = input_text
                         await emit_server_trace(
@@ -283,14 +267,10 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 if output_tx is not None:
                     output_text = str(getattr(output_tx, "text", "") or "").strip()
                     if output_text and output_text != last_output_transcript:
-                        logger.info(
-                            "[downstream.transcript.model] user=%s session=%s author=%s text=%r turn_complete=%s interrupted=%s",
-                            user_id,
-                            session_id,
-                            author,
-                            output_text,
-                            turn_complete,
-                            interrupted,
+                        _cloud_info(
+                            "[downstream.transcript.model] "
+                            f"user={user_id} session={session_id} author={author} "
+                            f"text={output_text!r} turn_complete={turn_complete} interrupted={interrupted}"
                         )
                         last_output_transcript = output_text
                         await emit_server_trace(
@@ -304,14 +284,11 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                         )
 
                 if turn_complete or interrupted:
-                    logger.info(
-                        "[downstream.event] user=%s session=%s author=%s turn_complete=%s interrupted=%s finish_reason=%s",
-                        user_id,
-                        session_id,
-                        author,
-                        turn_complete,
-                        interrupted,
-                        getattr(event, "finish_reason", None),
+                    _cloud_info(
+                        "[downstream.event] "
+                        f"user={user_id} session={session_id} author={author} "
+                        f"turn_complete={turn_complete} interrupted={interrupted} "
+                        f"finish_reason={getattr(event, 'finish_reason', None)}"
                     )
                 if not event.content or not event.content.parts:
                     continue
@@ -324,15 +301,11 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                         output_chunk_count += 1
                         output_bytes_total += len(data)
                         if output_chunk_count == 1 or output_chunk_count % AUDIO_LOG_EVERY_CHUNKS == 0:
-                            logger.info(
-                                "[downstream.audio] user=%s session=%s events=%s chunks=%s total_bytes=%s last_chunk=%s mime=%s",
-                                user_id,
-                                session_id,
-                                event_count,
-                                output_chunk_count,
-                                output_bytes_total,
-                                len(data),
-                                mt,
+                            _cloud_info(
+                                "[downstream.audio] "
+                                f"user={user_id} session={session_id} events={event_count} "
+                                f"chunks={output_chunk_count} total_bytes={output_bytes_total} "
+                                f"last_chunk={len(data)} mime={mt}"
                             )
                         await bridge.send_bytes(data)
 
@@ -349,14 +322,11 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 summary=f"APIError status={getattr(e, 'status_code', None)} {e}",
                 agent_name=root_agent.name,
             )
-            logger.error(
-                "[downstream] APIError user=%s session=%s status_code=%s message=%s",
-                user_id,
-                session_id,
-                getattr(e, "status_code", None),
-                e,
+            _cloud_info(
+                "[downstream] APIError "
+                f"user={user_id} session={session_id} status_code={getattr(e, 'status_code', None)} message={e}"
             )
-            logger.error("[downstream] recent outbound frames to Gemini: %s", recent)
+            _cloud_info(f"[downstream] recent outbound frames to Gemini: {recent}")
             print(f"[downstream] APIError: status_code={getattr(e, 'status_code', None)} message={e}")
             print(f"[downstream] LAST OUTBOUND (server->Gemini): {last}")
             traceback.print_exc()
@@ -375,13 +345,10 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 summary=f"{type(e).__name__}: {e}",
                 agent_name=root_agent.name,
             )
-            logger.exception(
-                "[downstream] Unexpected exception user=%s session=%s: %s",
-                user_id,
-                session_id,
-                e,
+            _cloud_info(
+                f"[downstream] Unexpected exception user={user_id} session={session_id}: {type(e).__name__}: {e}"
             )
-            logger.error("[downstream] recent outbound frames to Gemini: %s", recent)
+            _cloud_info(f"[downstream] recent outbound frames to Gemini: {recent}")
             print(f"[downstream] Unexpected exception: {type(e).__name__}: {e}")
             print(f"[downstream] LAST OUTBOUND (server->Gemini): {last}")
             traceback.print_exc()
@@ -394,13 +361,9 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
         for i, r in enumerate(results):
             if isinstance(r, Exception):
                 print(f"[ws] task#{i} exception: {type(r).__name__}: {r}")
-                logger.error(
-                    "[session] task exception user=%s session=%s task=%s type=%s message=%s",
-                    user_id,
-                    session_id,
-                    i,
-                    type(r).__name__,
-                    r,
+                _cloud_info(
+                    "[session] task exception "
+                    f"user={user_id} session={session_id} task={i} type={type(r).__name__} message={r}"
                 )
 
     finally:
@@ -415,7 +378,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
             "ts": time.time(),
         }
         log_trace_event(event)
-        logger.info("[session] closing user=%s session=%s", user_id, session_id)
+        _cloud_info(f"[session] closing user={user_id} session={session_id}")
         try:
             await bridge.send_json({"type": "trace_event", **event})
         except Exception:
