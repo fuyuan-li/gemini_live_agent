@@ -61,3 +61,41 @@ def test_companion_state_tracks_meta_cursors_and_events() -> None:
     assert snapshot.current_agent == "browser_agent"
     assert snapshot.current_tool == "navigate"
     assert len(snapshot.latest_events) == 2
+
+
+def test_companion_state_clears_stale_tool_on_agent_level_event() -> None:
+    state = CompanionState(session_id="sess-1")
+    state.handle_server_message(
+        {
+            "type": "trace_event",
+            "event_id": "evt-1",
+            "request_id": "req-1",
+            "session_id": "sess-1",
+            "source": "server",
+            "event": "tool_called",
+            "status": "started",
+            "summary": "click_here",
+            "tool_name": "click_here",
+            "agent_name": "browser_agent",
+            "ts": 1.0,
+        }
+    )
+    state.handle_server_message(
+        {
+            "type": "trace_event",
+            "event_id": "evt-2",
+            "request_id": "req-2",
+            "session_id": "sess-1",
+            "source": "server",
+            "event": "agent_spoke",
+            "status": "ok",
+            "summary": "Back to concierge.",
+            "agent_name": "concierge",
+            "ts": 2.0,
+        }
+    )
+
+    snapshot = state.snapshot()
+
+    assert snapshot.current_agent == "concierge"
+    assert snapshot.current_tool is None

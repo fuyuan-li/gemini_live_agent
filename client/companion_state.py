@@ -225,6 +225,15 @@ class CompanionState:
             self._latest_events.append(entry)
             if entry.agent_name:
                 self._current_agent = entry.agent_name
+                if entry.tool_name is None and entry.event in {
+                    "agent_started",
+                    "agent_finished",
+                    "agent_spoke",
+                    "user_spoke",
+                    "session_error",
+                    "session_disconnected",
+                }:
+                    self._current_tool = None
             if entry.tool_name:
                 self._current_tool = entry.tool_name
             if entry.summary and entry.event not in {"cursor_sent", "cursor_received"}:

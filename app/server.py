@@ -113,9 +113,8 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
     run_config = RunConfig(
         streaming_mode=StreamingMode.BIDI,
         response_modalities=[types.Modality.AUDIO],
-        # optional: transcriptions (handy for debugging)
-        # input_audio_transcription=types.AudioTranscriptionConfig(),
-        # output_audio_transcription=types.AudioTranscriptionConfig(),
+        input_audio_transcription=types.AudioTranscriptionConfig(),
+        output_audio_transcription=types.AudioTranscriptionConfig(),
     )
 
     async def upstream() -> None:
@@ -243,6 +242,8 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
             output_chunk_count = 0
             output_bytes_total = 0
             event_count = 0
+            last_input_transcript = ""
+            last_output_transcript = ""
             async for event in runner.run_live(
                 user_id=user_id,
                 session_id=session_id,
@@ -250,6 +251,68 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 run_config=run_config,
             ):
                 event_count += 1
+                author = getattr(event, "author", None)
+                turn_complete = bool(getattr(event, "turn_complete", False))
+                interrupted = bool(getattr(event, "interrupted", False))
+                input_tx = getattr(event, "input_transcription", None)
+                output_tx = getattr(event, "output_transcription", None)
+
+                if input_tx is not None:
+                    input_text = str(getattr(input_tx, "text", "") or "").strip()
+                    if input_text and input_text != last_input_transcript:
+                        logger.info(
+                            "[downstream.transcript.user] user=%s session=%s author=%s text=%r turn_complete=%s interrupted=%s",
+                            user_id,
+                            session_id,
+                            author,
+                            input_text,
+                            turn_complete,
+                            interrupted,
+                        )
+                        last_input_transcript = input_text
+                        await emit_server_trace(
+                            user_id=user_id,
+                            session_id=session_id,
+                            request_id=session_id,
+                            event="user_spoke",
+                            status="ok",
+                            summary=input_text,
+                            agent_name=str(author) if author else None,
+                        )
+
+                if output_tx is not None:
+                    output_text = str(getattr(output_tx, "text", "") or "").strip()
+                    if output_text and output_text != last_output_transcript:
+                        logger.info(
+                            "[downstream.transcript.model] user=%s session=%s author=%s text=%r turn_complete=%s interrupted=%s",
+                            user_id,
+                            session_id,
+                            author,
+                            output_text,
+                            turn_complete,
+                            interrupted,
+                        )
+                        last_output_transcript = output_text
+                        await emit_server_trace(
+                            user_id=user_id,
+                            session_id=session_id,
+                            request_id=session_id,
+                            event="agent_spoke",
+                            status="ok",
+                            summary=output_text,
+                            agent_name=str(author) if author else None,
+                        )
+
+                if turn_complete or interrupted:
+                    logger.info(
+                        "[downstream.event] user=%s session=%s author=%s turn_complete=%s interrupted=%s finish_reason=%s",
+                        user_id,
+                        session_id,
+                        author,
+                        turn_complete,
+                        interrupted,
+                        getattr(event, "finish_reason", None),
+                    )
                 if not event.content or not event.content.parts:
                     continue
                 for part in event.content.parts:
