@@ -7,6 +7,7 @@ from typing import List, Optional, Sequence, Tuple
 import cv2  # type: ignore
 import numpy as np  # type: ignore
 
+from .displays import get_main_display_geometry
 from .types import CursorSample
 
 
@@ -14,21 +15,15 @@ from .types import CursorSample
 class ScreenGeometry:
     width: int
     height: int
+    display_id: Optional[int] = None
 
 
 def get_main_display_size() -> Tuple[int, int]:
     """
     Return main display size on macOS via Quartz, fallback to 1920x1080.
     """
-    try:
-        import Quartz  # type: ignore
-
-        bounds = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID())
-        w = int(bounds.size.width)
-        h = int(bounds.size.height)
-        return max(1, w), max(1, h)
-    except Exception:
-        return 1920, 1080
+    geom = get_main_display_geometry()
+    return geom.width, geom.height
 
 
 class CursorMapper:
@@ -39,8 +34,8 @@ class CursorMapper:
         stale_timeout_s: float = 0.4,
     ) -> None:
         if screen_geometry is None:
-            w, h = get_main_display_size()
-            screen_geometry = ScreenGeometry(width=w, height=h)
+            geom = get_main_display_geometry()
+            screen_geometry = ScreenGeometry(width=geom.width, height=geom.height, display_id=geom.display_id)
 
         self.screen_geometry = screen_geometry
         self.smoothing = float(min(1.0, max(0.0, smoothing)))
@@ -51,6 +46,7 @@ class CursorMapper:
 
         # 3x3 homography matrix mapping normalized camera coords -> screen px.
         self._homography = None
+        self._calibration_display_id: Optional[int] = None
 
     def reset(self) -> None:
         self._smoothed_xy = None
@@ -58,6 +54,9 @@ class CursorMapper:
 
     def has_calibration(self) -> bool:
         return self._homography is not None
+
+    def get_calibration_display_id(self) -> Optional[int]:
+        return self._calibration_display_id
 
     def get_calibration_targets(self, margin_ratio: float = 0.10) -> List[Tuple[str, int, int]]:
         mx = int(self.screen_geometry.width * margin_ratio)
@@ -73,6 +72,7 @@ class CursorMapper:
 
     def clear_calibration(self) -> None:
         self._homography = None
+        self._calibration_display_id = None
         self.reset()
 
     def update_from_normalized(
@@ -140,6 +140,7 @@ class CursorMapper:
             return False, f"failed to estimate calibration transform: {exc}"
 
         self._homography = H
+        self._calibration_display_id = self.screen_geometry.display_id
         self.reset()
         return True, "calibration active for current process"
 

@@ -21,5 +21,18 @@ async def get_viewport_origin_screen() -> Tuple[int, int]:
 async def refresh_viewport_origin_screen() -> Tuple[int, int]:
     return await _runtime_mod().refresh_viewport_origin_screen()
 
+async def get_browser_geometry():
+    return await _runtime_mod().get_browser_geometry()
 
-__all__ = ["get_page", "get_viewport_origin_screen", "refresh_viewport_origin_screen"]
+
+async def refresh_browser_geometry():
+    return await _runtime_mod().refresh_browser_geometry()
+
+
+__all__ = [
+    "get_page",
+    "get_viewport_origin_screen",
+    "refresh_viewport_origin_screen",
+    "get_browser_geometry",
+    "refresh_browser_geometry",
+]

@@ -77,6 +77,9 @@ class _ControllerBridge(AppKit.NSObject):  # type: ignore[misc, valid-type]
     def reconnect_(self, sender) -> None:
         self.owner.request_reconnect()
 
+    def recalibrate_(self, sender) -> None:
+        self.owner.recalibrate()
+
     def toggleDebug_(self, sender) -> None:
         self.owner.toggle_debug()
 
@@ -118,6 +121,7 @@ class CompanionWindowController:
         self.connection_label = None
         self.cloud_label = None
         self.status_label = None
+        self.calibration_label = None
         self.agent_label = None
         self.tool_label = None
         self.summary_label = None
@@ -130,6 +134,8 @@ class CompanionWindowController:
         if not self.provider.start():
             raise RuntimeError(f"failed to start cursor provider: {self.provider.status()}")
         self._build_window()
+        self.window.makeKeyAndOrderFront_(None)
+        self.recalibrate()
         self.runtime.start()
         self._timer = Foundation.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             0.1,
@@ -138,7 +144,6 @@ class CompanionWindowController:
             None,
             True,
         )
-        self.window.makeKeyAndOrderFront_(None)
 
     def stop(self) -> None:
         if self._timer is not None:
@@ -154,6 +159,18 @@ class CompanionWindowController:
 
     def request_reconnect(self) -> None:
         self.runtime.request_reconnect()
+
+    def recalibrate(self) -> None:
+        self.state.set_calibration_state("uncalibrated", "Running guided hand calibration...")
+        ok, msg = self.provider.run_guided_calibration(announce=self._calibration_announce)
+        state = "calibrated" if ok else "uncalibrated"
+        self.state.set_calibration_state(state, msg)
+        self.state.record_local_event(
+            request_id=self.session_id,
+            event="cursor_calibration",
+            status="ok" if ok else "error",
+            summary=msg,
+        )
 
     def toggle_debug(self) -> None:
         self.debug_visible = not self.debug_visible
@@ -181,6 +198,10 @@ class CompanionWindowController:
         if self.status_label is not None:
             self.status_label.setStringValue_(
                 f"Mic={'Muted' if snapshot.muted else 'Live'}   Camera=Live   Session={self.session_id}"
+            )
+        if self.calibration_label is not None:
+            self.calibration_label.setStringValue_(
+                f"Calibration: {snapshot.calibration_state}  {snapshot.calibration_message or '-'}"
             )
         if self.agent_label is not None:
             self.agent_label.setStringValue_(f"Agent: {snapshot.current_agent or '-'}")
@@ -216,11 +237,16 @@ class CompanionWindowController:
         self.connection_label = _make_label(AppKit.NSMakeRect(20, 520, 220, 22), "Connecting...", bold=True)
         self.cloud_label = _make_label(AppKit.NSMakeRect(250, 520, 680, 22), "Cloud Run: waiting for service metadata")
         self.status_label = _make_label(AppKit.NSMakeRect(20, 494, 420, 20), "Mic=Live   Camera=Live")
+        self.calibration_label = _make_label(
+            AppKit.NSMakeRect(20, 470, 900, 20),
+            "Calibration: uncalibrated",
+        )
         content.addSubview_(self.connection_label)
         content.addSubview_(self.cloud_label)
         content.addSubview_(self.status_label)
+        content.addSubview_(self.calibration_label)
 
-        self.preview_view = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(20, 180, 460, 290))
+        self.preview_view = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(20, 170, 460, 290))
         self.preview_view.setImageScaling_(AppKit.NSImageScaleAxesIndependently)
         content.addSubview_(self.preview_view)
 
@@ -248,7 +274,13 @@ class CompanionWindowController:
         reconnect_button.setAction_("reconnect:")
         content.addSubview_(reconnect_button)
 
-        self.debug_button = AppKit.NSButton.alloc().initWithFrame_(AppKit.NSMakeRect(780, 250, 120, 32))
+        calibrate_button = AppKit.NSButton.alloc().initWithFrame_(AppKit.NSMakeRect(780, 250, 120, 32))
+        calibrate_button.setTitle_("Calibrate")
+        calibrate_button.setTarget_(self._bridge)
+        calibrate_button.setAction_("recalibrate:")
+        content.addSubview_(calibrate_button)
+
+        self.debug_button = AppKit.NSButton.alloc().initWithFrame_(AppKit.NSMakeRect(520, 210, 120, 32))
         self.debug_button.setTitle_("Show Debug")
         self.debug_button.setTarget_(self._bridge)
         self.debug_button.setAction_("toggleDebug:")
@@ -301,6 +333,9 @@ class CompanionWindowController:
         image = _ns_image_from_bgr(composed)
         if image is not None:
             self.preview_view.setImage_(image)
+
+    def _calibration_announce(self, message: str) -> None:
+        self.state.set_calibration_state("uncalibrated", message)
 
 
 class _AppDelegate(AppKit.NSObject):  # type: ignore[misc, valid-type]

@@ -39,6 +39,7 @@ class EventEntry:
     tool_name: Optional[str] = None
     duration_ms: Optional[int] = None
     cursor: Optional[dict[str, int]] = None
+    metadata: Optional[dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,8 @@ class CompanionSnapshot:
     local_cursor: Optional[CursorPoint]
     server_cursor: Optional[CursorPoint]
     fingertip: Optional[NormalizedSample]
+    calibration_state: str
+    calibration_message: str
 
 
 class CompanionState:
@@ -70,6 +73,8 @@ class CompanionState:
         self._server_cursor: Optional[CursorPoint] = None
         self._fingertip: Optional[NormalizedSample] = None
         self._last_cursor_sent_trace = 0.0
+        self._calibration_state = "uncalibrated"
+        self._calibration_message = "Hand cursor calibration is required."
 
     def snapshot(self) -> CompanionSnapshot:
         with self._lock:
@@ -84,6 +89,8 @@ class CompanionState:
                 local_cursor=self._local_cursor,
                 server_cursor=self._server_cursor,
                 fingertip=self._fingertip,
+                calibration_state=self._calibration_state,
+                calibration_message=self._calibration_message,
             )
 
     def set_connected(self, connected: bool) -> None:
@@ -116,6 +123,11 @@ class CompanionState:
             if cursor is not None:
                 self._local_cursor = CursorPoint(x=int(cursor.x), y=int(cursor.y), ts=float(cursor.ts))
 
+    def set_calibration_state(self, state: str, message: str = "") -> None:
+        with self._lock:
+            self._calibration_state = str(state)
+            self._calibration_message = str(message)
+
     def record_local_event(
         self,
         *,
@@ -127,6 +139,7 @@ class CompanionState:
         tool_name: Optional[str] = None,
         duration_ms: Optional[int] = None,
         cursor: Optional[dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         payload = build_trace_event(
             request_id=request_id,
@@ -139,6 +152,7 @@ class CompanionState:
             tool_name=tool_name,
             duration_ms=duration_ms,
             cursor=cursor,
+            metadata=metadata,
         )
         self._apply_event(payload)
 
@@ -200,6 +214,7 @@ class CompanionState:
             tool_name=str(payload["tool_name"]) if payload.get("tool_name") else None,
             duration_ms=int(payload["duration_ms"]) if payload.get("duration_ms") is not None else None,
             cursor=payload.get("cursor"),
+            metadata=payload.get("metadata"),
         )
         print(
             f"[trace][{entry.source}] event={entry.event} status={entry.status} "

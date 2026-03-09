@@ -122,7 +122,7 @@ class CompanionRuntime:
                     self._reconnect_async.clear()
                     sender = WSSender(ws, telemetry)
                     executor = LocalToolExecutor(
-                        provider=None,
+                        provider=self.provider,
                         sender=sender,
                         cursor_supplier=self.state.get_local_cursor_xy,
                         event_callback=self._executor_event_callback,
@@ -255,6 +255,9 @@ class CompanionRuntime:
                 await executor.handle_message(payload)
 
     def _executor_event_callback(self, payload: dict[str, object]) -> None:
+        calibration_state = str(payload["calibration_state"]) if payload.get("calibration_state") else None
+        if calibration_state is not None:
+            self.state.set_calibration_state(calibration_state, str(payload.get("summary", "")))
         self.state.record_local_event(
             request_id=str(payload.get("request_id", self.state.session_id)),
             event=str(payload.get("event", "tool_result_received")),
@@ -262,4 +265,6 @@ class CompanionRuntime:
             summary=str(payload.get("summary", "")),
             tool_name=str(payload["tool_name"]) if payload.get("tool_name") else None,
             agent_name=str(payload["agent_name"]) if payload.get("agent_name") else None,
+            cursor=payload.get("cursor") if isinstance(payload.get("cursor"), dict) else None,
+            metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
         )

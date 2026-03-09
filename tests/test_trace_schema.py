@@ -13,6 +13,7 @@ def test_trace_event_round_trip_message_shape() -> None:
         tool_name="navigate",
         duration_ms=12,
         cursor={"x": 1, "y": 2},
+        metadata={"display_id": 7},
         ts=10.0,
         event_id="evt-1",
     )
@@ -22,6 +23,7 @@ def test_trace_event_round_trip_message_shape() -> None:
     assert message["event_id"] == "evt-1"
     assert message["request_id"] == "req-1"
     assert message["cursor"] == {"x": 1, "y": 2}
+    assert message["metadata"] == {"display_id": 7}
 
 
 def test_session_meta_and_cursor_ack_shape() -> None:

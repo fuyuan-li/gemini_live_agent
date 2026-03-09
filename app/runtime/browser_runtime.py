@@ -4,6 +4,23 @@ from typing import Optional, Tuple
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright, CDPSession
 
+from client.cursor.displays import get_display_for_rect
+
+
+@dataclass(frozen=True)
+class WindowBounds:
+    left: int
+    top: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
+class BrowserGeometry:
+    window_bounds: WindowBounds
+    viewport_origin: Tuple[int, int]
+    viewport_size: Tuple[int, int]
+    display_id: Optional[int]
 
 @dataclass
 class BrowserState:
@@ -13,15 +30,14 @@ class BrowserState:
     page: Page
     cdp: CDPSession
     window_id: int
-    # viewport top-left in *screen coords*
-    viewport_origin: Tuple[int, int]
+    geometry: BrowserGeometry
 
 
 _state: Optional[BrowserState] = None
 _lock = asyncio.Lock()
 
 
-async def _compute_viewport_origin(page: Page, cdp: CDPSession) -> Tuple[Tuple[int, int], int]:
+async def _compute_browser_geometry(page: Page, cdp: CDPSession) -> Tuple[BrowserGeometry, int]:
     """
     Compute viewport top-left origin in screen coordinates.
 
@@ -61,7 +77,15 @@ async def _compute_viewport_origin(page: Page, cdp: CDPSession) -> Tuple[Tuple[i
     origin_x = left + border_x
     origin_y = top + chrome_top
 
-    return (origin_x, origin_y), window_id
+    window_bounds = WindowBounds(left=left, top=top, width=outer_w, height=outer_h)
+    display = get_display_for_rect(left, top, outer_w, outer_h)
+    geometry = BrowserGeometry(
+        window_bounds=window_bounds,
+        viewport_origin=(origin_x, origin_y),
+        viewport_size=(vp_w, vp_h),
+        display_id=None if display is None else int(display.display_id),
+    )
+    return geometry, window_id
 
 
 async def get_page(headless: bool = False, viewport: Tuple[int, int] = (1280, 800)) -> Page:
@@ -79,7 +103,7 @@ async def get_page(headless: bool = False, viewport: Tuple[int, int] = (1280, 80
 
         cdp = await context.new_cdp_session(page)
 
-        (origin_x, origin_y), window_id = await _compute_viewport_origin(page, cdp)
+        geometry, window_id = await _compute_browser_geometry(page, cdp)
 
         _state = BrowserState(
             playwright=pw,
@@ -88,7 +112,7 @@ async def get_page(headless: bool = False, viewport: Tuple[int, int] = (1280, 80
             page=page,
             cdp=cdp,
             window_id=window_id,
-            viewport_origin=(origin_x, origin_y),
+            geometry=geometry,
         )
         return page
 
@@ -102,22 +126,36 @@ async def get_viewport_origin_screen() -> Tuple[int, int]:
         if _state is None:
             # force init
             page = await get_page(headless=False)
-        return _state.viewport_origin  # type: ignore
+        return _state.geometry.viewport_origin  # type: ignore
 
 
-async def refresh_viewport_origin_screen() -> Tuple[int, int]:
+async def get_browser_geometry() -> BrowserGeometry:
+    global _state
+    async with _lock:
+        if _state is None:
+            await get_page(headless=False)
+        assert _state is not None
+        return _state.geometry
+
+
+async def refresh_browser_geometry() -> BrowserGeometry:
     """
-    Recompute viewport origin in case user moved/resized the browser window.
+    Recompute browser geometry in case user moved/resized the browser window.
     """
     global _state
     async with _lock:
         if _state is None:
             await get_page(headless=False)
         assert _state is not None
-        (origin_x, origin_y), window_id = await _compute_viewport_origin(_state.page, _state.cdp)
+        geometry, window_id = await _compute_browser_geometry(_state.page, _state.cdp)
         _state.window_id = window_id
-        _state.viewport_origin = (origin_x, origin_y)
-        return _state.viewport_origin
+        _state.geometry = geometry
+        return _state.geometry
+
+
+async def refresh_viewport_origin_screen() -> Tuple[int, int]:
+    geometry = await refresh_browser_geometry()
+    return geometry.viewport_origin
 
 
 async def shutdown() -> None:

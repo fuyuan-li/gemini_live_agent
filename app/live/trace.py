@@ -41,6 +41,7 @@ def build_trace_event(
     tool_name: Optional[str] = None,
     duration_ms: Optional[int] = None,
     cursor: Optional[Mapping[str, Any]] = None,
+    metadata: Optional[Mapping[str, Any]] = None,
     ts: Optional[float] = None,
     event_id: Optional[str] = None,
 ) -> dict[str, Any]:
@@ -65,6 +66,8 @@ def build_trace_event(
             "x": int(cursor["x"]),
             "y": int(cursor["y"]),
         }
+    if metadata is not None:
+        payload["metadata"] = dict(metadata)
     return payload
 
 

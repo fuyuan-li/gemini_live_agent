@@ -239,4 +239,5 @@ class HandCursorProvider:
             "preview_window_enabled": bool(getattr(self.tracker, "preview_window_enabled", True)),
             "overlay_enabled": self.overlay is not None,
             "calibrated": self.mapper.has_calibration(),
+            "calibration_display_id": self.mapper.get_calibration_display_id(),
         }

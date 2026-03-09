@@ -4,7 +4,8 @@ from typing import Optional, Tuple
 
 from google.adk.tools.tool_context import ToolContext
 
-from app.runtime import get_page, refresh_viewport_origin_screen
+from app.runtime import get_page, refresh_browser_geometry
+from app.runtime.browser_runtime import BrowserGeometry
 
 
 # -----------------------------
@@ -92,6 +93,26 @@ async def pan(direction: str, amount: int = 300) -> dict:
     return await drag(cx, cy, cx + dx, cy + dy, steps=30)
 
 
+def _geometry_to_payload(geometry: BrowserGeometry) -> dict:
+    return {
+        "display_id": geometry.display_id,
+        "window_bounds": {
+            "left": geometry.window_bounds.left,
+            "top": geometry.window_bounds.top,
+            "width": geometry.window_bounds.width,
+            "height": geometry.window_bounds.height,
+        },
+        "viewport_origin": {
+            "x": int(geometry.viewport_origin[0]),
+            "y": int(geometry.viewport_origin[1]),
+        },
+        "viewport_size": {
+            "width": int(geometry.viewport_size[0]),
+            "height": int(geometry.viewport_size[1]),
+        },
+    }
+
+
 # -----------------------------
 # Cursor-driven tools (ToolContext.state)
 # -----------------------------
@@ -124,50 +145,72 @@ async def _cursor_screen_to_viewport(tool_context: ToolContext) -> Optional[Tupl
     if cur is None:
         return None
 
-    page = await get_page(headless=False)
-    origin_x, origin_y = await refresh_viewport_origin_screen()
+    geometry = await refresh_browser_geometry()
+    origin_x, origin_y = geometry.viewport_origin
     print(f"[tool] origin= {origin_x, origin_y}, cur={dir(cur)}")
 
     vx = int(cur[0] - origin_x)
     vy = int(cur[1] - origin_y)
 
-    vp = page.viewport_size or {"width": 1280, "height": 800}
-    vx = max(0, min(vx, int(vp["width"]) - 1))
-    vy = max(0, min(vy, int(vp["height"]) - 1))
+    vp_w, vp_h = geometry.viewport_size
+    vx = max(0, min(vx, int(vp_w) - 1))
+    vy = max(0, min(vy, int(vp_h) - 1))
     return vx, vy
 
 
-async def screen_to_viewport(x: int, y: int) -> Tuple[int, int]:
+async def screen_to_viewport(
+    x: int,
+    y: int,
+    *,
+    geometry: Optional[BrowserGeometry] = None,
+) -> Tuple[int, int]:
     """
     Convert OS screen coordinates into Playwright viewport coordinates.
     """
-    page = await get_page(headless=False)
-    origin_x, origin_y = await refresh_viewport_origin_screen()
+    resolved_geometry = geometry or await refresh_browser_geometry()
+    origin_x, origin_y = resolved_geometry.viewport_origin
 
     vx = int(int(x) - origin_x)
     vy = int(int(y) - origin_y)
 
-    vp = page.viewport_size or {"width": 1280, "height": 800}
-    vx = max(0, min(vx, int(vp["width"]) - 1))
-    vy = max(0, min(vy, int(vp["height"]) - 1))
+    vp_w, vp_h = resolved_geometry.viewport_size
+    vx = max(0, min(vx, int(vp_w) - 1))
+    vy = max(0, min(vy, int(vp_h) - 1))
     return vx, vy
 
 
-async def click_screen_point(x: int, y: int) -> dict:
+async def click_screen_point(x: int, y: int, *, geometry: Optional[BrowserGeometry] = None) -> dict:
     """
     Click using OS screen coordinates.
     """
-    vx, vy = await screen_to_viewport(x, y)
+    resolved_geometry = geometry or await refresh_browser_geometry()
+    vx, vy = await screen_to_viewport(x, y, geometry=resolved_geometry)
     page = await get_page(headless=False)
     await page.mouse.click(vx, vy)
-    return {"ok": True, "action": "click_here", "x": vx, "y": vy, "url": page.url}
+    return {
+        "ok": True,
+        "action": "click_here",
+        "x": vx,
+        "y": vy,
+        "screen_cursor": {"x": int(x), "y": int(y)},
+        "browser": _geometry_to_payload(resolved_geometry),
+        "url": page.url,
+    }
 
 
-async def scroll_screen_point(x: int, y: int, delta_y: int, delta_x: int = 0) -> dict:
+async def scroll_screen_point(
+    x: int,
+    y: int,
+    delta_y: int,
+    delta_x: int = 0,
+    *,
+    geometry: Optional[BrowserGeometry] = None,
+) -> dict:
     """
     Wheel scroll using OS screen coordinates.
     """
-    vx, vy = await screen_to_viewport(x, y)
+    resolved_geometry = geometry or await refresh_browser_geometry()
+    vx, vy = await screen_to_viewport(x, y, geometry=resolved_geometry)
     page = await get_page(headless=False)
     await page.mouse.move(vx, vy)
     await page.mouse.wheel(int(delta_x), int(delta_y))
@@ -176,18 +219,32 @@ async def scroll_screen_point(x: int, y: int, delta_y: int, delta_x: int = 0) ->
         "action": "scroll_here",
         "x": vx,
         "y": vy,
+        "screen_cursor": {"x": int(x), "y": int(y)},
+        "browser": _geometry_to_payload(resolved_geometry),
         "delta_x": int(delta_x),
         "delta_y": int(delta_y),
         "url": page.url,
     }
 
 
-async def drag_screen_point_by_offset(x: int, y: int, dx: int, dy: int, steps: int = 30) -> dict:
+async def drag_screen_point_by_offset(
+    x: int,
+    y: int,
+    dx: int,
+    dy: int,
+    steps: int = 30,
+    *,
+    geometry: Optional[BrowserGeometry] = None,
+) -> dict:
     """
     Drag from an OS screen coordinate by viewport-relative offsets.
     """
-    vx, vy = await screen_to_viewport(x, y)
-    return await drag(vx, vy, vx + int(dx), vy + int(dy), steps=int(steps))
+    resolved_geometry = geometry or await refresh_browser_geometry()
+    vx, vy = await screen_to_viewport(x, y, geometry=resolved_geometry)
+    result = await drag(vx, vy, vx + int(dx), vy + int(dy), steps=int(steps))
+    result["screen_cursor"] = {"x": int(x), "y": int(y)}
+    result["browser"] = _geometry_to_payload(resolved_geometry)
+    return result
 
 
 async def click_here(tool_context: ToolContext) -> dict:
