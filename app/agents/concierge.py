@@ -1,5 +1,6 @@
 from google.adk.agents import Agent
 from .browser_agent import browser_agent
+from .echo_dedupe import echo_dedupe_before_agent_callback
 from .echo_dedupe import echo_dedupe_before_tool_callback
 from .handoff_guard import transfer_audio_gate_before_tool_callback
 
@@ -15,6 +16,7 @@ root_agent = Agent(
         "If the current conversation is no longer about browser control, handle it yourself. "
         "After opening, tell the user what you opened."
     ),
+    before_agent_callback=echo_dedupe_before_agent_callback,
     before_tool_callback=[
         echo_dedupe_before_tool_callback,
         transfer_audio_gate_before_tool_callback,

@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from google.genai import types
+
 from app.live.trace import build_trace_event, log_trace_event
 
 
@@ -25,6 +27,17 @@ def is_echo_replay(latest_model_output: Optional[str], latest_user_input: Option
     if not model_text or not user_text:
         return False
     return model_text == user_text
+
+
+def extract_text_from_content(content: Optional[types.Content]) -> str:
+    if content is None or not content.parts:
+        return ""
+    parts: list[str] = []
+    for part in content.parts:
+        text = getattr(part, "text", None)
+        if text:
+            parts.append(str(text))
+    return " ".join(parts).strip()
 
 
 async def echo_dedupe_before_tool_callback(tool, args: dict[str, Any], tool_context) -> Optional[dict[str, Any]]:
@@ -60,3 +73,35 @@ async def echo_dedupe_before_tool_callback(tool, args: dict[str, Any], tool_cont
         "ignored": True,
         "reason": "echo_deduped",
     }
+
+
+async def echo_dedupe_before_agent_callback(callback_context) -> Optional[types.Content]:
+    latest_model_output = callback_context.state.get(LATEST_MODEL_OUTPUT_KEY)
+    latest_user_input = extract_text_from_content(getattr(callback_context, "user_content", None))
+    if not latest_user_input:
+        latest_user_input = str(callback_context.state.get(LATEST_USER_INPUT_KEY) or "")
+    if not is_echo_replay(latest_model_output, latest_user_input):
+        return None
+
+    event = build_trace_event(
+        request_id=callback_context.invocation_id,
+        session_id=callback_context.session.id,
+        source="server",
+        event="agent_deduped",
+        status="ok",
+        summary="before_agent reason=echo_deduped",
+        agent_name=callback_context.agent_name,
+        metadata={
+            "reason": "echo_deduped",
+            "latest_model_output": str(latest_model_output or ""),
+            "latest_user_input": str(latest_user_input or ""),
+        },
+    )
+    log_trace_event(event)
+    print(
+        "[agent_deduped] "
+        f"user={callback_context.user_id} session={callback_context.session.id} "
+        f"agent={callback_context.agent_name} reason=echo_deduped "
+        f"latest_model_output={latest_model_output!r} latest_user_input={latest_user_input!r}"
+    )
+    return types.Content(parts=[])

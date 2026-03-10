@@ -1,11 +1,15 @@
 import asyncio
 
+from google.genai import types
+
 from app.agents.browser_agent import browser_agent
 from app.agents.concierge import root_agent
 from app.agents.echo_dedupe import (
     LATEST_MODEL_OUTPUT_KEY,
     LATEST_USER_INPUT_KEY,
+    echo_dedupe_before_agent_callback,
     echo_dedupe_before_tool_callback,
+    extract_text_from_content,
     is_echo_replay,
 )
 from app.agents.handoff_guard import transfer_audio_gate_before_tool_callback
@@ -13,6 +17,19 @@ from app.agents.handoff_guard import transfer_audio_gate_before_tool_callback
 
 class _FakeSession:
     id = "session-1"
+
+
+class _FakeAgentContext:
+    def __init__(self, *, latest_model_output: str, latest_user_input: str) -> None:
+        self.state = {
+            LATEST_MODEL_OUTPUT_KEY: latest_model_output,
+            LATEST_USER_INPUT_KEY: latest_user_input,
+        }
+        self.invocation_id = "inv-2"
+        self.session = _FakeSession()
+        self.user_id = "user-1"
+        self.agent_name = "concierge"
+        self.user_content = types.Content(parts=[types.Part(text=latest_user_input)], role="user")
 
 
 class _FakeToolContext:
@@ -29,6 +46,18 @@ class _FakeToolContext:
 
 class _FakeTool:
     name = "remote_click_here"
+
+
+def test_extract_text_from_content_joins_text_parts() -> None:
+    content = types.Content(
+        parts=[
+            types.Part(text="Bye"),
+            types.Part(text="there"),
+        ],
+        role="user",
+    )
+
+    assert extract_text_from_content(content) == "Bye there"
 
 
 def test_is_echo_replay_normalizes_case_spacing_and_punctuation() -> None:
@@ -72,7 +101,36 @@ def test_echo_dedupe_before_tool_callback_allows_non_matching_input() -> None:
     assert result is None
 
 
+def test_echo_dedupe_before_agent_callback_returns_empty_content_for_matching_replay() -> None:
+    result = asyncio.run(
+        echo_dedupe_before_agent_callback(
+            _FakeAgentContext(
+                latest_model_output="Bye!",
+                latest_user_input="bye.",
+            )
+        )
+    )
+
+    assert isinstance(result, types.Content)
+    assert result.parts == []
+
+
+def test_echo_dedupe_before_agent_callback_allows_non_matching_input() -> None:
+    result = asyncio.run(
+        echo_dedupe_before_agent_callback(
+            _FakeAgentContext(
+                latest_model_output="Bye!",
+                latest_user_input="thanks",
+            )
+        )
+    )
+
+    assert result is None
+
+
 def test_agents_share_same_echo_dedupe_callback() -> None:
+    assert browser_agent.before_agent_callback is echo_dedupe_before_agent_callback
+    assert root_agent.before_agent_callback is echo_dedupe_before_agent_callback
     assert browser_agent.before_tool_callback == [
         echo_dedupe_before_tool_callback,
         transfer_audio_gate_before_tool_callback,
