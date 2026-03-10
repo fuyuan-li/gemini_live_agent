@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
+import time
 from collections import deque
 from typing import Optional
 
@@ -12,6 +14,8 @@ import websockets
 from client.companion_state import CompanionState
 from client.cursor.provider import HandCursorProvider
 from client.local_executor import LocalToolExecutor
+from client.playback_guard import PlaybackGuard
+from client.playback_guard import PlaybackGuardConfig
 from client.session_ids import build_ws_session_url, generate_session_id, normalize_ws_root_url
 from client.ws_guard import OutboundTelemetry, WSSender
 
@@ -34,10 +38,19 @@ CLIENT_TRACE_EVENTS = {
     "audio_stream_unmuted",
     "audio_gate_closed",
     "audio_gate_opened",
+    "playback_guard_drop",
+    "playback_guard_interrupt",
     "session_reconnect_requested",
     "tool_result_received",
 }
 CLIENT_TRACE_MAX_BACKLOG = 256
+PLAYBACK_GUARD_TAIL_MS = int(os.getenv("CLIENT_PLAYBACK_GUARD_TAIL_MS", "350"))
+PLAYBACK_GUARD_ECHO_MAX_RATIO = float(os.getenv("CLIENT_PLAYBACK_GUARD_ECHO_MAX_RATIO", "0.55"))
+PLAYBACK_GUARD_MIC_FLOOR_RMS = int(os.getenv("CLIENT_PLAYBACK_GUARD_MIC_FLOOR_RMS", "900"))
+PLAYBACK_GUARD_BARGE_IN_RATIO = float(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_RATIO", "1.20"))
+PLAYBACK_GUARD_BARGE_IN_RMS = int(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_RMS", "2200"))
+PLAYBACK_GUARD_BARGE_IN_CHUNKS = int(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_CHUNKS", "2"))
+PLAYBACK_GUARD_BARGE_IN_HOLD_MS = int(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_HOLD_MS", "900"))
 
 
 class CompanionRuntime:
@@ -62,6 +75,18 @@ class CompanionRuntime:
         self._reconnect_async: Optional[asyncio.Event] = None
         self._mic_queue: Optional[asyncio.Queue[bytes]] = None
         self._audio_gate_open = True
+        self._playback_guard = PlaybackGuard(
+            PlaybackGuardConfig(
+                playback_tail_ms=PLAYBACK_GUARD_TAIL_MS,
+                echo_max_ratio=PLAYBACK_GUARD_ECHO_MAX_RATIO,
+                mic_floor_rms=PLAYBACK_GUARD_MIC_FLOOR_RMS,
+                barge_in_ratio=PLAYBACK_GUARD_BARGE_IN_RATIO,
+                barge_in_rms=PLAYBACK_GUARD_BARGE_IN_RMS,
+                barge_in_chunks=PLAYBACK_GUARD_BARGE_IN_CHUNKS,
+                barge_in_hold_ms=PLAYBACK_GUARD_BARGE_IN_HOLD_MS,
+            )
+        )
+        self._playback_guard_drop_active = False
         self._client_trace_lock = threading.Lock()
         self._pending_client_traces: deque[dict[str, object]] = deque(maxlen=CLIENT_TRACE_MAX_BACKLOG)
         self.state.set_local_trace_listener(self._queue_client_trace)
@@ -139,6 +164,8 @@ class CompanionRuntime:
                     ping_timeout=20,
                 ) as ws:
                     self._audio_gate_open = True
+                    self._playback_guard.reset()
+                    self._playback_guard_drop_active = False
                     self.state.set_connected(True)
                     self.state.record_local_event(
                         request_id=self.state.session_id,
@@ -267,6 +294,21 @@ class CompanionRuntime:
                     continue
                 if not self._audio_gate_open:
                     continue
+                decision = self._playback_guard.should_send_mic_chunk(chunk, now=time.time())
+                if not decision.send:
+                    self._record_playback_guard_drop(decision.mic_rms, decision.playback_rms)
+                    continue
+                self._playback_guard_drop_active = False
+                if decision.reason == "barge_in_detected":
+                    self.state.record_local_event(
+                        request_id=self.state.session_id,
+                        event="playback_guard_interrupt",
+                        status="ok",
+                        summary=(
+                            f"barge-in opened mic gate mic_rms={decision.mic_rms} "
+                            f"playback_rms={decision.playback_rms}"
+                        ),
+                    )
                 await sender.send_bytes("mic_chunk", chunk)
         self._mic_queue = None
 
@@ -284,6 +326,7 @@ class CompanionRuntime:
             async for msg in ws:
                 if isinstance(msg, bytes) and msg:
                     out.write(msg)
+                    self._playback_guard.note_playback_chunk(msg, now=time.time())
                     continue
                 if not isinstance(msg, str):
                     continue
@@ -304,6 +347,7 @@ class CompanionRuntime:
         if state == "closed":
             self._audio_gate_open = False
             self._drain_mic_queue()
+            self._playback_guard_drop_active = False
             self.state.record_local_event(
                 request_id=self.state.session_id,
                 event="audio_gate_closed",
@@ -313,6 +357,7 @@ class CompanionRuntime:
             return
         if state == "open":
             self._audio_gate_open = True
+            self._playback_guard_drop_active = False
             self.state.record_local_event(
                 request_id=self.state.session_id,
                 event="audio_gate_opened",
@@ -329,6 +374,17 @@ class CompanionRuntime:
                 q.get_nowait()
             except asyncio.QueueEmpty:
                 return
+
+    def _record_playback_guard_drop(self, mic_rms: int, playback_rms: int) -> None:
+        if self._playback_guard_drop_active:
+            return
+        self._playback_guard_drop_active = True
+        self.state.record_local_event(
+            request_id=self.state.session_id,
+            event="playback_guard_drop",
+            status="ok",
+            summary=f"suppressed mic during playback mic_rms={mic_rms} playback_rms={playback_rms}",
+        )
 
     def _executor_event_callback(self, payload: dict[str, object]) -> None:
         calibration_state = str(payload["calibration_state"]) if payload.get("calibration_state") else None
