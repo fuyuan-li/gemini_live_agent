@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import re
 from typing import Any, Optional
 
@@ -10,15 +11,17 @@ from app.live.trace import build_trace_event, log_trace_event
 
 LATEST_MODEL_OUTPUT_KEY = "latest_model_output"
 LATEST_USER_INPUT_KEY = "latest_user_input"
-_TRAILING_PUNCT_RE = re.compile(r"[\s\.,!?;:'\"`]+$")
+_NON_WORD_RE = re.compile(r"[^\w\s]+", re.UNICODE)
 _WHITESPACE_RE = re.compile(r"\s+")
+_FUZZY_REPLAY_MIN_CHARS = 24
+_FUZZY_REPLAY_MIN_RATIO = 0.92
 
 
 def normalize_echo_text(value: Optional[str]) -> str:
     if not value:
         return ""
-    text = _WHITESPACE_RE.sub(" ", str(value).strip().lower())
-    return _TRAILING_PUNCT_RE.sub("", text)
+    text = _NON_WORD_RE.sub(" ", str(value).strip().lower())
+    return _WHITESPACE_RE.sub(" ", text).strip()
 
 
 def is_echo_replay(latest_model_output: Optional[str], latest_user_input: Optional[str]) -> bool:
@@ -26,7 +29,19 @@ def is_echo_replay(latest_model_output: Optional[str], latest_user_input: Option
     user_text = normalize_echo_text(latest_user_input)
     if not model_text or not user_text:
         return False
-    return model_text == user_text
+    if model_text == user_text:
+        return True
+
+    longest_len = max(len(model_text), len(user_text))
+    shortest_len = min(len(model_text), len(user_text))
+    if shortest_len < _FUZZY_REPLAY_MIN_CHARS:
+        return False
+
+    ratio = difflib.SequenceMatcher(None, model_text, user_text).ratio()
+    if ratio < _FUZZY_REPLAY_MIN_RATIO:
+        return False
+
+    return shortest_len / longest_len >= 0.75
 
 
 def extract_text_from_content(content: Optional[types.Content]) -> str:

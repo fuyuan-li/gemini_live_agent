@@ -65,6 +65,28 @@ def test_is_echo_replay_normalizes_case_spacing_and_punctuation() -> None:
         "OK, I've scrolled down.",
         "  ok, i've scrolled down   ",
     )
+    assert is_echo_replay(
+        "Hello! How can I help you today?",
+        "Hello, how can I help you today?",
+    )
+
+
+def test_is_echo_replay_matches_long_truncated_replay() -> None:
+    assert is_echo_replay(
+        "It seems we're both trying to be helpful! Do you have any browser tasks you need assistance",
+        "It seems we're both trying to be helpful. Do you have any browser tasks you need to",
+    )
+
+
+def test_is_echo_replay_does_not_fuzzily_match_short_unrelated_text() -> None:
+    assert not is_echo_replay(
+        "Bye!",
+        "Hi!",
+    )
+    assert not is_echo_replay(
+        "What would you like to do?",
+        "What website do you want?",
+    )
 
 
 def test_echo_dedupe_before_tool_callback_short_circuits_matching_replay() -> None:
@@ -105,8 +127,8 @@ def test_echo_dedupe_before_agent_callback_returns_empty_content_for_matching_re
     result = asyncio.run(
         echo_dedupe_before_agent_callback(
             _FakeAgentContext(
-                latest_model_output="Bye!",
-                latest_user_input="bye.",
+                latest_model_output="Hello! How can I help you today?",
+                latest_user_input="Hello, how can I help you today?",
             )
         )
     )
@@ -119,7 +141,7 @@ def test_echo_dedupe_before_agent_callback_allows_non_matching_input() -> None:
     result = asyncio.run(
         echo_dedupe_before_agent_callback(
             _FakeAgentContext(
-                latest_model_output="Bye!",
+                latest_model_output="Hello! How can I help you today?",
                 latest_user_input="thanks",
             )
         )
