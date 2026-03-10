@@ -11,6 +11,7 @@ import websockets
 
 from client.cursor.provider import CursorProvider, HandCursorProvider, MouseCursorProvider
 from client.local_executor import LocalToolExecutor
+from client.session_ids import DEFAULT_WS_ROOT_URL, build_ws_session_url, generate_session_id, normalize_ws_root_url
 from client.ws_guard import OutboundTelemetry, WSSender
 
 # Live audio requirements per ADK streaming guide:
@@ -24,7 +25,7 @@ DTYPE = "int16"
 
 CHUNK_MS = 100
 CHUNK_SAMPLES = int(IN_RATE * CHUNK_MS / 1000)
-DEFAULT_WS_URL = "ws://127.0.0.1:8000/ws/local_user/local_session"
+DEFAULT_WS_URL = DEFAULT_WS_ROOT_URL
 RECONNECT_DELAY_S = 2.0
 
 
@@ -171,20 +172,29 @@ async def run_client(args: argparse.Namespace) -> None:
     if not provider.start():
         raise RuntimeError(f"failed to start cursor provider: {provider.status()}")
 
+    ws_root_url = normalize_ws_root_url(args.ws_url)
+    session_id = generate_session_id()
     loop = asyncio.get_running_loop()
     toggle_q: asyncio.Queue[None] = asyncio.Queue()
     stdin_stop_evt = _start_stdin_reader(loop, toggle_q)
 
     try:
+        first_attempt = True
         while True:
+            if first_attempt:
+                first_attempt = False
+            else:
+                session_id = generate_session_id()
             telemetry = OutboundTelemetry()
+            ws_url = build_ws_session_url(ws_root_url, session_id)
             try:
                 async with websockets.connect(
-                    args.ws_url,
+                    ws_url,
                     max_size=None,
                     ping_interval=20,
                     ping_timeout=20,
                 ) as ws:
+                    print(f"[voice_cli] connected session={session_id}")
                     sender = WSSender(ws, telemetry)
                     executor = LocalToolExecutor(provider=provider, sender=sender)
                     await asyncio.gather(

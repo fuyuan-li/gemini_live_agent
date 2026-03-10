@@ -103,7 +103,7 @@ Useful options:
 For hackathon demo mode, run the native macOS companion window instead of the CLI:
 
 ```bash
-python client/companion_app.py --ws-url wss://YOUR-CLOUD-RUN-SERVICE/ws/local_user/local_session
+python client/companion_app.py --ws-url wss://YOUR-CLOUD-RUN-SERVICE/ws/local_user
 ```
 
 What it does:
@@ -111,6 +111,7 @@ What it does:
 - opens a local companion window with live preview + trace timeline
 - keeps the system overlay dot for "here" interactions
 - auto-connects to the live session and starts streaming mic audio
+- generates a fresh random session id on startup and again before each reconnect
 - renders Cloud Run service / revision / commit metadata from server-side `session_meta`
 
 ## Agent Topology

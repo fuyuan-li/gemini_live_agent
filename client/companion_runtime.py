@@ -12,6 +12,7 @@ import websockets
 from client.companion_state import CompanionState
 from client.cursor.provider import HandCursorProvider
 from client.local_executor import LocalToolExecutor
+from client.session_ids import build_ws_session_url, generate_session_id, normalize_ws_root_url
 from client.ws_guard import OutboundTelemetry, WSSender
 
 
@@ -46,7 +47,7 @@ class CompanionRuntime:
         state: CompanionState,
         cursor_send_hz: float = 20.0,
     ) -> None:
-        self.ws_url = ws_url
+        self.ws_root_url = normalize_ws_root_url(ws_url)
         self.provider = provider
         self.state = state
         self.cursor_send_hz = float(max(1.0, cursor_send_hz))
@@ -118,11 +119,17 @@ class CompanionRuntime:
         self._loop = asyncio.get_running_loop()
         self._stop_async = asyncio.Event()
         self._reconnect_async = asyncio.Event()
+        first_attempt = True
         while not self._stop_evt.is_set():
+            if first_attempt:
+                first_attempt = False
+            else:
+                self._rotate_session()
             telemetry = OutboundTelemetry()
+            current_ws_url = build_ws_session_url(self.ws_root_url, self.state.session_id)
             try:
                 async with websockets.connect(
-                    self.ws_url,
+                    current_ws_url,
                     max_size=None,
                     ping_interval=20,
                     ping_timeout=20,
@@ -297,13 +304,8 @@ class CompanionRuntime:
             if not self._pending_client_traces:
                 return None
             return self._pending_client_traces.popleft()
-        self.state.record_local_event(
-            request_id=str(payload.get("request_id", self.state.session_id)),
-            event=str(payload.get("event", "tool_result_received")),
-            status=str(payload.get("status", "ok")),
-            summary=str(payload.get("summary", "")),
-            tool_name=str(payload["tool_name"]) if payload.get("tool_name") else None,
-            agent_name=str(payload["agent_name"]) if payload.get("agent_name") else None,
-            cursor=payload.get("cursor") if isinstance(payload.get("cursor"), dict) else None,
-            metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
-        )
+
+    def _rotate_session(self) -> None:
+        with self._client_trace_lock:
+            self._pending_client_traces.clear()
+        self.state.set_session_id(generate_session_id())

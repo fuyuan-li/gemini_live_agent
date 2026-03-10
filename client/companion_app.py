@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from urllib.parse import urlparse
 
 import AppKit  # type: ignore
 import Foundation  # type: ignore
@@ -12,9 +11,10 @@ from client.companion_runtime import CompanionRuntime
 from client.companion_state import CompanionState
 from client.cursor.mapper import get_main_display_size
 from client.cursor.provider import HandCursorProvider
+from client.session_ids import DEFAULT_WS_ROOT_URL, generate_session_id, normalize_ws_root_url
 
 
-DEFAULT_WS_URL = "ws://127.0.0.1:8000/ws/local_user/local_session"
+DEFAULT_WS_URL = DEFAULT_WS_ROOT_URL
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -28,15 +28,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--hand-overlay-radius", type=int, default=10)
     p.add_argument("--hand-mirror", action=argparse.BooleanOptionalAction, default=True)
     return p
-
-
-def _extract_session_id(ws_url: str) -> str:
-    path = urlparse(ws_url).path.strip("/")
-    parts = path.split("/")
-    if len(parts) >= 3:
-        return parts[-1]
-    return "local_session"
-
 
 def _make_label(frame, text: str, *, font_size: float = 12.0, bold: bool = False):
     label = AppKit.NSTextField.alloc().initWithFrame_(frame)
@@ -93,8 +84,8 @@ class _ControllerBridge(AppKit.NSObject):  # type: ignore[misc, valid-type]
 class CompanionWindowController:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        self.session_id = _extract_session_id(args.ws_url)
-        self.state = CompanionState(session_id=self.session_id)
+        self.ws_root_url = normalize_ws_root_url(args.ws_url)
+        self.state = CompanionState(session_id=generate_session_id())
         self.provider = HandCursorProvider(
             camera_index=args.camera_index,
             smoothing=args.hand_smoothing,
@@ -107,7 +98,7 @@ class CompanionWindowController:
             overlay_radius=args.hand_overlay_radius,
         )
         self.runtime = CompanionRuntime(
-            ws_url=args.ws_url,
+            ws_url=self.ws_root_url,
             provider=self.provider,
             state=self.state,
             cursor_send_hz=args.cursor_send_hz,
@@ -166,7 +157,7 @@ class CompanionWindowController:
         state = "calibrated" if ok else "uncalibrated"
         self.state.set_calibration_state(state, msg)
         self.state.record_local_event(
-            request_id=self.session_id,
+            request_id=self.state.session_id,
             event="cursor_calibration",
             status="ok" if ok else "error",
             summary=msg,
@@ -197,7 +188,7 @@ class CompanionWindowController:
                 )
         if self.status_label is not None:
             self.status_label.setStringValue_(
-                f"Mic={'Muted' if snapshot.muted else 'Live'}   Camera=Live   Session={self.session_id}"
+                f"Mic={'Muted' if snapshot.muted else 'Live'}   Camera=Live   Session={snapshot.session_id}"
             )
         if self.calibration_label is not None:
             self.calibration_label.setStringValue_(

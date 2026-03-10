@@ -401,3 +401,11 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
             pass
         queue.close()
         await unregister_bridge(user_id=user_id, session_id=session_id, bridge=bridge)
+        try:
+            await session_service.delete_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+            _cloud_info(f"[session] deleted user={user_id} session={session_id}")
+        except Exception as exc:
+            _cloud_info(
+                "[session] delete failed "
+                f"user={user_id} session={session_id} type={type(exc).__name__} message={exc}"
+            )

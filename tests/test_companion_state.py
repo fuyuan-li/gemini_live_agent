@@ -118,3 +118,39 @@ def test_companion_state_notifies_local_trace_listener_for_local_events() -> Non
     assert seen[0]["source"] == "client"
     assert seen[0]["event"] == "session_connected"
     assert seen[0]["agent_name"] == "concierge"
+
+
+def test_companion_state_updates_session_id_and_clears_server_session_metadata() -> None:
+    state = CompanionState(session_id="sess-1")
+    state.handle_server_message(
+        {
+            "type": "session_meta",
+            "session_id": "sess-1",
+            "service": "svc",
+            "revision": "rev-1",
+            "commit": "abc",
+        }
+    )
+    state.handle_server_message(
+        {
+            "type": "trace_event",
+            "event_id": "evt-1",
+            "request_id": "req-1",
+            "session_id": "sess-1",
+            "source": "server",
+            "event": "agent_spoke",
+            "status": "ok",
+            "summary": "hello",
+            "agent_name": "concierge",
+            "ts": 1.0,
+        }
+    )
+
+    state.set_session_id("sess-2")
+    snapshot = state.snapshot()
+
+    assert snapshot.session_id == "sess-2"
+    assert snapshot.session_meta is None
+    assert snapshot.current_agent is None
+    assert snapshot.current_tool is None
+    assert snapshot.last_summary == ""

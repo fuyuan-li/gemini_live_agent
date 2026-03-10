@@ -44,6 +44,7 @@ class EventEntry:
 
 @dataclass(frozen=True)
 class CompanionSnapshot:
+    session_id: str
     connected: bool
     muted: bool
     session_meta: Optional[SessionMeta]
@@ -60,8 +61,8 @@ class CompanionSnapshot:
 
 class CompanionState:
     def __init__(self, *, session_id: str, event_limit: int = 200) -> None:
-        self.session_id = session_id
         self._lock = threading.Lock()
+        self._session_id = str(session_id)
         self._connected = False
         self._muted = False
         self._session_meta: Optional[SessionMeta] = None
@@ -80,6 +81,7 @@ class CompanionState:
     def snapshot(self) -> CompanionSnapshot:
         with self._lock:
             return CompanionSnapshot(
+                session_id=self._session_id,
                 connected=self._connected,
                 muted=self._muted,
                 session_meta=self._session_meta,
@@ -93,6 +95,20 @@ class CompanionState:
                 calibration_state=self._calibration_state,
                 calibration_message=self._calibration_message,
             )
+
+    @property
+    def session_id(self) -> str:
+        with self._lock:
+            return self._session_id
+
+    def set_session_id(self, session_id: str) -> None:
+        with self._lock:
+            self._session_id = str(session_id)
+            self._session_meta = None
+            self._server_cursor = None
+            self._current_agent = None
+            self._current_tool = None
+            self._last_summary = ""
 
     def set_connected(self, connected: bool) -> None:
         with self._lock:
