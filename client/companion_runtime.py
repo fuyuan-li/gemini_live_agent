@@ -32,6 +32,8 @@ CLIENT_TRACE_EVENTS = {
     "audio_stream_started",
     "audio_stream_muted",
     "audio_stream_unmuted",
+    "audio_gate_closed",
+    "audio_gate_opened",
     "session_reconnect_requested",
     "tool_result_received",
 }
@@ -58,6 +60,8 @@ class CompanionRuntime:
         self._stop_evt = threading.Event()
         self._stop_async: Optional[asyncio.Event] = None
         self._reconnect_async: Optional[asyncio.Event] = None
+        self._mic_queue: Optional[asyncio.Queue[bytes]] = None
+        self._audio_gate_open = True
         self._client_trace_lock = threading.Lock()
         self._pending_client_traces: deque[dict[str, object]] = deque(maxlen=CLIENT_TRACE_MAX_BACKLOG)
         self.state.set_local_trace_listener(self._queue_client_trace)
@@ -134,6 +138,7 @@ class CompanionRuntime:
                     ping_interval=20,
                     ping_timeout=20,
                 ) as ws:
+                    self._audio_gate_open = True
                     self.state.set_connected(True)
                     self.state.record_local_event(
                         request_id=self.state.session_id,
@@ -232,6 +237,7 @@ class CompanionRuntime:
 
     async def _mic_sender(self, sender: WSSender) -> None:
         q: asyncio.Queue[bytes] = asyncio.Queue()
+        self._mic_queue = q
 
         def callback(indata, frames, time_info, status) -> None:
             if status:
@@ -259,7 +265,10 @@ class CompanionRuntime:
                     continue
                 if self.state.snapshot().muted:
                     continue
+                if not self._audio_gate_open:
+                    continue
                 await sender.send_bytes("mic_chunk", chunk)
+        self._mic_queue = None
 
     async def _receiver_loop(
         self,
@@ -282,9 +291,44 @@ class CompanionRuntime:
                     payload = json.loads(msg)
                 except Exception:
                     continue
+                if payload.get("type") == "audio_gate":
+                    await self._handle_audio_gate(payload)
+                    continue
                 if self.state.handle_server_message(payload):
                     continue
                 await executor.handle_message(payload)
+
+    async def _handle_audio_gate(self, payload: dict[str, object]) -> None:
+        state = str(payload.get("state", "") or "").lower()
+        reason = str(payload.get("reason", "") or "")
+        if state == "closed":
+            self._audio_gate_open = False
+            self._drain_mic_queue()
+            self.state.record_local_event(
+                request_id=self.state.session_id,
+                event="audio_gate_closed",
+                status="ok",
+                summary=f"audio gate closed ({reason})",
+            )
+            return
+        if state == "open":
+            self._audio_gate_open = True
+            self.state.record_local_event(
+                request_id=self.state.session_id,
+                event="audio_gate_opened",
+                status="ok",
+                summary=f"audio gate opened ({reason})",
+            )
+
+    def _drain_mic_queue(self) -> None:
+        q = self._mic_queue
+        if q is None:
+            return
+        while True:
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                return
 
     def _executor_event_callback(self, payload: dict[str, object]) -> None:
         calibration_state = str(payload["calibration_state"]) if payload.get("calibration_state") else None

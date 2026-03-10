@@ -8,6 +8,7 @@ from app.agents.echo_dedupe import (
     echo_dedupe_before_tool_callback,
     is_echo_replay,
 )
+from app.agents.handoff_guard import transfer_audio_gate_before_tool_callback
 
 
 class _FakeSession:
@@ -72,5 +73,11 @@ def test_echo_dedupe_before_tool_callback_allows_non_matching_input() -> None:
 
 
 def test_agents_share_same_echo_dedupe_callback() -> None:
-    assert browser_agent.before_tool_callback is echo_dedupe_before_tool_callback
-    assert root_agent.before_tool_callback is echo_dedupe_before_tool_callback
+    assert browser_agent.before_tool_callback == [
+        echo_dedupe_before_tool_callback,
+        transfer_audio_gate_before_tool_callback,
+    ]
+    assert root_agent.before_tool_callback == [
+        echo_dedupe_before_tool_callback,
+        transfer_audio_gate_before_tool_callback,
+    ]

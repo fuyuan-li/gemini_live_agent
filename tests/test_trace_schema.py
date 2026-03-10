@@ -1,4 +1,5 @@
 from app.live.trace import (
+    make_audio_gate_message,
     build_trace_event,
     format_trace_event,
     make_client_trace_message,
@@ -55,6 +56,7 @@ def test_trace_event_round_trip_message_shape() -> None:
 def test_session_meta_and_cursor_ack_shape() -> None:
     meta = make_session_meta(session_id="sess-1", service="svc", revision="rev-1", commit="abc123")
     ack = make_cursor_ack(session_id="sess-1", request_id="cursor:3", x=9, y=8, ts=4.0)
+    gate = make_audio_gate_message(session_id="sess-1", state="closed", reason="transfer_to_agent")
 
     assert meta == {
         "type": "session_meta",
@@ -65,3 +67,9 @@ def test_session_meta_and_cursor_ack_shape() -> None:
     }
     assert ack["type"] == "cursor_ack"
     assert ack["cursor"] == {"x": 9, "y": 8}
+    assert gate == {
+        "type": "audio_gate",
+        "session_id": "sess-1",
+        "state": "closed",
+        "reason": "transfer_to_agent",
+    }

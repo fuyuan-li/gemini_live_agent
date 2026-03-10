@@ -121,6 +121,20 @@ def make_cursor_ack(
     }
 
 
+def make_audio_gate_message(
+    *,
+    session_id: str,
+    state: str,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "type": "audio_gate",
+        "session_id": str(session_id),
+        "state": str(state),
+        "reason": str(reason),
+    }
+
+
 def parse_trace_payload(
     payload: Mapping[str, Any],
     *,

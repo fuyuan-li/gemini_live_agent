@@ -1,5 +1,6 @@
 # app/server.py
 import asyncio
+import audioop
 import json
 import logging
 import os
@@ -10,12 +11,16 @@ from dotenv import load_dotenv
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.agents.run_config import RunConfig, StreamingMode
-from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.genai import types
 from google.adk.events import Event, EventActions
 from google.genai.errors import APIError
 import traceback
 
+from app.agents.handoff_guard import clear_transfer_audio_gate
+from app.live.audio_gate import SessionAudioGate
+from app.live.audio_gate import register_audio_gate
+from app.live.audio_gate import unregister_audio_gate
+from app.live.resettable_queue import ResettableLiveRequestQueue
 from app.state.realtime_pointer import set_cursor
 from .agents import root_agent
 from .agents.echo_dedupe import LATEST_MODEL_OUTPUT_KEY, LATEST_USER_INPUT_KEY
@@ -41,6 +46,8 @@ AUDIO_LOG_EVERY_CHUNKS = int(os.getenv("AUDIO_LOG_EVERY_CHUNKS", "20"))
 CURSOR_TRACE_INTERVAL_S = float(os.getenv("CURSOR_TRACE_INTERVAL_S", "1.0"))
 CURSOR_TRACE_MIN_DELTA_PX = int(os.getenv("CURSOR_TRACE_MIN_DELTA_PX", "24"))
 EXPECTED_AUDIO_CHUNK_BYTES = 3200
+MANUAL_VAD_RMS_THRESHOLD = int(os.getenv("MANUAL_VAD_RMS_THRESHOLD", "250"))
+MANUAL_VAD_SILENCE_MS = int(os.getenv("MANUAL_VAD_SILENCE_MS", "500"))
 logger = logging.getLogger("app.server.live")
 
 
@@ -126,7 +133,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
         )
 
     # LiveRequestQueue: one per streaming session  [oai_citation:10‡Google GitHub](https://google.github.io/adk-docs/streaming/dev-guide/part1/)
-    queue = LiveRequestQueue()
+    queue = ResettableLiveRequestQueue()
 
     # Audio-in / Audio-out streaming config  [oai_citation:11‡Google GitHub](https://google.github.io/adk-docs/streaming/dev-guide/part1/)
     run_config = RunConfig(
@@ -134,7 +141,13 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
         response_modalities=[types.Modality.AUDIO],
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
+        realtime_input_config=types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
+            activity_handling=types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
+        ),
     )
+    audio_gate = SessionAudioGate(queue=queue)
+    register_audio_gate(user_id=user_id, session_id=session_id, gate=audio_gate)
 
     async def upstream() -> None:
         """
@@ -145,6 +158,8 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
         try:
             audio_chunk_count = 0
             audio_bytes_total = 0
+            dropped_audio_chunk_count = 0
+            activity_count = 0
             last_cursor_trace_ts = 0.0
             last_logged_cursor: tuple[int, int] | None = None
             while True:
@@ -169,8 +184,46 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                             f"user={user_id} session={session_id} chunks={audio_chunk_count} "
                             f"total_bytes={audio_bytes_total} last_chunk={len(b)}"
                         )
-                    blob = types.Blob(mime_type=INPUT_MIME, data=b)
-                    queue.send_realtime(blob)
+                    now = time.time()
+                    rms = int(audioop.rms(b, 2))
+                    async with audio_gate.lock:
+                        if not audio_gate.allow_audio_upload:
+                            dropped_audio_chunk_count += 1
+                            if dropped_audio_chunk_count == 1 or dropped_audio_chunk_count % AUDIO_LOG_EVERY_CHUNKS == 0:
+                                _cloud_info(
+                                    "[upstream.audio] gated "
+                                    f"user={user_id} session={session_id} chunks={dropped_audio_chunk_count} "
+                                    f"handoff_pending={audio_gate.handoff_pending} target={audio_gate.target_agent}"
+                                )
+                            continue
+
+                        blob = types.Blob(mime_type=INPUT_MIME, data=b)
+                        is_speech = rms >= MANUAL_VAD_RMS_THRESHOLD
+                        if audio_gate.speech_active:
+                            queue.send_realtime(blob)
+                            if is_speech:
+                                audio_gate.silence_started_at = None
+                            else:
+                                if audio_gate.silence_started_at is None:
+                                    audio_gate.silence_started_at = now
+                                elif (now - audio_gate.silence_started_at) * 1000 >= MANUAL_VAD_SILENCE_MS:
+                                    queue.send_activity_end()
+                                    audio_gate.speech_active = False
+                                    audio_gate.silence_started_at = None
+                                    _cloud_info(
+                                        "[upstream.audio] activity_end "
+                                        f"user={user_id} session={session_id} rms={rms}"
+                                    )
+                        elif is_speech:
+                            queue.send_activity_start()
+                            queue.send_realtime(blob)
+                            audio_gate.speech_active = True
+                            audio_gate.silence_started_at = None
+                            activity_count += 1
+                            _cloud_info(
+                                "[upstream.audio] activity_start "
+                                f"user={user_id} session={session_id} count={activity_count} rms={rms}"
+                            )
                     continue
 
                 # control text (cursor)
@@ -364,6 +417,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
             # This is the key "PRINT PRINT PRINT"
             last = get_last_outbound()
             recent = get_recent_outbound()
+            await clear_transfer_audio_gate(user_id=user_id, session_id=session_id)
             await emit_server_trace(
                 user_id=user_id,
                 session_id=session_id,
@@ -381,12 +435,17 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
             print(f"[downstream] APIError: status_code={getattr(e, 'status_code', None)} message={e}")
             print(f"[downstream] LAST OUTBOUND (server->Gemini): {last}")
             traceback.print_exc()
+            try:
+                await websocket.close(code=1011, reason="live_api_error")
+            except Exception:
+                pass
             # re-raise so gather can see it (or swallow if you want)
             raise
 
         except Exception as e:
             last = get_last_outbound()
             recent = get_recent_outbound()
+            await clear_transfer_audio_gate(user_id=user_id, session_id=session_id)
             await emit_server_trace(
                 user_id=user_id,
                 session_id=session_id,
@@ -403,6 +462,10 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
             print(f"[downstream] Unexpected exception: {type(e).__name__}: {e}")
             print(f"[downstream] LAST OUTBOUND (server->Gemini): {last}")
             traceback.print_exc()
+            try:
+                await websocket.close(code=1011, reason="downstream_error")
+            except Exception:
+                pass
             raise
 
     try:
@@ -418,6 +481,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 )
 
     finally:
+        await clear_transfer_audio_gate(user_id=user_id, session_id=session_id)
         event = {
             "event_id": f"disconnect-{session_id}",
             "request_id": session_id,
@@ -435,6 +499,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
         except Exception:
             pass
         queue.close()
+        unregister_audio_gate(user_id=user_id, session_id=session_id)
         await unregister_bridge(user_id=user_id, session_id=session_id, bridge=bridge)
         try:
             await session_service.delete_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
