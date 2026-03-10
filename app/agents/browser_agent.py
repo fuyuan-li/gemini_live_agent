@@ -1,5 +1,6 @@
 from google.adk.agents import Agent
 
+from .echo_dedupe import echo_dedupe_before_tool_callback
 from app.tools.remote_browser import (
     remote_navigate,
     remote_pan,
@@ -43,5 +44,6 @@ browser_agent = Agent(
         "8) Short confirmations are fine for browser actions, but do not chat outside your browser scope.\n"
         "9) Examples that should transfer to concierge: thanks, opinions, jokes, general questions, and requests to switch back to the main assistant.\n"
     ),
+    before_tool_callback=echo_dedupe_before_tool_callback,
     tools=[remote_navigate, remote_pan, remote_click_here, remote_scroll_here, remote_drag_here],
 )

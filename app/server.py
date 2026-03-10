@@ -18,6 +18,7 @@ import traceback
 
 from app.state.realtime_pointer import set_cursor
 from .agents import root_agent
+from .agents.echo_dedupe import LATEST_MODEL_OUTPUT_KEY, LATEST_USER_INPUT_KEY
 from app.live.trace import log_trace_event, make_cursor_ack, parse_trace_payload
 from app.runtime.genai_ws_sniffer import get_last_outbound, get_recent_outbound, record_outbound
 from app.runtime.cursor_payload import parse_cursor_payload
@@ -105,6 +106,23 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
     if not session:
         session = await session_service.create_session(
             app_name=APP_NAME, user_id=user_id, session_id=session_id
+        )
+
+    async def append_session_state_text(*, key: str, value: str, author: str | None) -> None:
+        text = str(value or "").strip()
+        if not text:
+            return
+        await session_service.append_event(
+            session=session,
+            event=Event(
+                invocation_id=f"state:{session_id}:{key}:{int(time.time() * 1000)}",
+                author=str(author or root_agent.name),
+                actions=EventActions(state_delta={key: text}),
+            ),
+        )
+        _cloud_info(
+            "[session.state] "
+            f"user={user_id} session={session_id} author={author} key={key} value={text!r}"
         )
 
     # LiveRequestQueue: one per streaming session  [oai_citation:10‡Google GitHub](https://google.github.io/adk-docs/streaming/dev-guide/part1/)
@@ -248,6 +266,8 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
             event_count = 0
             last_input_transcript = ""
             last_output_transcript = ""
+            last_final_input_transcript = ""
+            last_final_output_transcript = ""
             async for event in runner.run_live(
                 user_id=user_id,
                 session_id=session_id,
@@ -256,6 +276,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
             ):
                 event_count += 1
                 author = getattr(event, "author", None)
+                partial = bool(getattr(event, "partial", False))
                 turn_complete = bool(getattr(event, "turn_complete", False))
                 interrupted = bool(getattr(event, "interrupted", False))
                 input_tx = getattr(event, "input_transcription", None)
@@ -279,6 +300,13 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                             summary=input_text,
                             agent_name=str(author) if author else None,
                         )
+                    if not partial and input_text and input_text != last_final_input_transcript:
+                        await append_session_state_text(
+                            key=LATEST_USER_INPUT_KEY,
+                            value=input_text,
+                            author=str(author) if author else None,
+                        )
+                        last_final_input_transcript = input_text
 
                 if output_tx is not None:
                     output_text = str(getattr(output_tx, "text", "") or "").strip()
@@ -298,6 +326,13 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                             summary=output_text,
                             agent_name=str(author) if author else None,
                         )
+                    if not partial and output_text and output_text != last_final_output_transcript:
+                        await append_session_state_text(
+                            key=LATEST_MODEL_OUTPUT_KEY,
+                            value=output_text,
+                            author=str(author) if author else None,
+                        )
+                        last_final_output_transcript = output_text
 
                 if turn_complete or interrupted:
                     _cloud_info(
