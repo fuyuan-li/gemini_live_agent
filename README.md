@@ -121,8 +121,14 @@ Current topology:
 
 Responsibilities:
 
-- `concierge`: handles top-level voice interaction and delegates browser requests.
+- `concierge`: handles top-level voice interaction, owns non-browser conversation, and delegates browser requests.
 - `browser_agent`: runs in the orchestrator and forwards browser actions to the local executor (`navigate`, `click_here`, `scroll_here`, `drag_here`, `pan`).
+
+Handoff rules:
+
+- `browser_agent` only handles browser control: opening pages/sites and interacting with the current page.
+- If the user asks for something outside browser control, or the request is ambiguous, `browser_agent` transfers back to `concierge`.
+- This handoff uses ADK's built-in `transfer_to_agent`; do not add `transfer_to_agent` manually to `tools=[...]` when the agent already has `sub_agents`.
 
 ## Protocol
 
