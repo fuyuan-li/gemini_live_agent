@@ -48,12 +48,55 @@ CURSOR_TRACE_MIN_DELTA_PX = int(os.getenv("CURSOR_TRACE_MIN_DELTA_PX", "24"))
 EXPECTED_AUDIO_CHUNK_BYTES = 3200
 MANUAL_VAD_RMS_THRESHOLD = int(os.getenv("MANUAL_VAD_RMS_THRESHOLD", "250"))
 MANUAL_VAD_SILENCE_MS = int(os.getenv("MANUAL_VAD_SILENCE_MS", "500"))
+PLAYBACK_INTERRUPT_TAIL_MS = int(os.getenv("PLAYBACK_INTERRUPT_TAIL_MS", "350"))
+PLAYBACK_INTERRUPT_FLOOR_RMS = int(os.getenv("PLAYBACK_INTERRUPT_FLOOR_RMS", "400"))
+PLAYBACK_INTERRUPT_RMS = int(os.getenv("PLAYBACK_INTERRUPT_RMS", "1800"))
+PLAYBACK_INTERRUPT_RATIO = float(os.getenv("PLAYBACK_INTERRUPT_RATIO", "1.10"))
+PLAYBACK_INTERRUPT_CHUNKS = int(os.getenv("PLAYBACK_INTERRUPT_CHUNKS", "2"))
 logger = logging.getLogger("app.server.live")
 
 
 def _cloud_info(message: str) -> None:
     logger.info(message)
     print(message)
+
+
+def _note_playback_output(audio_gate: SessionAudioGate, *, chunk: bytes, now: float) -> int:
+    rms = int(audioop.rms(chunk, 2))
+    if rms >= PLAYBACK_INTERRUPT_FLOOR_RMS:
+        if now >= audio_gate.playback_active_until:
+            audio_gate.playback_rms = rms
+        else:
+            audio_gate.playback_rms = max(audio_gate.playback_rms, rms)
+        audio_gate.playback_active_until = max(
+            audio_gate.playback_active_until,
+            now + (PLAYBACK_INTERRUPT_TAIL_MS / 1000.0),
+        )
+    elif now >= audio_gate.playback_active_until:
+        audio_gate.playback_rms = 0
+    return rms
+
+
+def _playback_interrupt_ready(audio_gate: SessionAudioGate, *, rms: int, now: float) -> bool:
+    if now >= audio_gate.playback_active_until or audio_gate.playback_rms <= 0:
+        audio_gate.playback_rms = 0
+        audio_gate.interrupt_streak = 0
+        return True
+
+    threshold = max(
+        PLAYBACK_INTERRUPT_RMS,
+        int(audio_gate.playback_rms * PLAYBACK_INTERRUPT_RATIO),
+    )
+    if rms < threshold:
+        audio_gate.interrupt_streak = 0
+        return False
+
+    audio_gate.interrupt_streak += 1
+    if audio_gate.interrupt_streak < PLAYBACK_INTERRUPT_CHUNKS:
+        return False
+
+    audio_gate.interrupt_streak = 0
+    return True
 
 def install_websockets_send_sniffer():
     import websockets.asyncio.connection as conn_mod
@@ -159,6 +202,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
             audio_chunk_count = 0
             audio_bytes_total = 0
             dropped_audio_chunk_count = 0
+            playback_guard_drop_count = 0
             activity_count = 0
             last_cursor_trace_ts = 0.0
             last_logged_cursor: tuple[int, int] | None = None
@@ -203,6 +247,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                             queue.send_realtime(blob)
                             if is_speech:
                                 audio_gate.silence_started_at = None
+                                audio_gate.interrupt_streak = 0
                             else:
                                 if audio_gate.silence_started_at is None:
                                     audio_gate.silence_started_at = now
@@ -210,15 +255,30 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                                     queue.send_activity_end()
                                     audio_gate.speech_active = False
                                     audio_gate.silence_started_at = None
+                                    audio_gate.interrupt_streak = 0
                                     _cloud_info(
                                         "[upstream.audio] activity_end "
                                         f"user={user_id} session={session_id} rms={rms}"
                                     )
                         elif is_speech:
+                            if not _playback_interrupt_ready(audio_gate, rms=rms, now=now):
+                                playback_guard_drop_count += 1
+                                if (
+                                    playback_guard_drop_count == 1
+                                    or playback_guard_drop_count % AUDIO_LOG_EVERY_CHUNKS == 0
+                                ):
+                                    _cloud_info(
+                                        "[upstream.audio] playback_guard "
+                                        f"user={user_id} session={session_id} chunks={playback_guard_drop_count} "
+                                        f"rms={rms} playback_rms={audio_gate.playback_rms}"
+                                    )
+                                continue
                             queue.send_activity_start()
                             queue.send_realtime(blob)
                             audio_gate.speech_active = True
                             audio_gate.silence_started_at = None
+                            audio_gate.interrupt_streak = 0
+                            playback_guard_drop_count = 0
                             activity_count += 1
                             _cloud_info(
                                 "[upstream.audio] activity_start "
@@ -404,6 +464,8 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                     if mt and mt.startswith("audio/pcm") and data is not None:
                         output_chunk_count += 1
                         output_bytes_total += len(data)
+                        async with audio_gate.lock:
+                            _note_playback_output(audio_gate, chunk=data, now=time.time())
                         if output_chunk_count == 1 or output_chunk_count % AUDIO_LOG_EVERY_CHUNKS == 0:
                             _cloud_info(
                                 "[downstream.audio] "

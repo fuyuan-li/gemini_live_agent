@@ -45,12 +45,14 @@ CLIENT_TRACE_EVENTS = {
 }
 CLIENT_TRACE_MAX_BACKLOG = 256
 PLAYBACK_GUARD_TAIL_MS = int(os.getenv("CLIENT_PLAYBACK_GUARD_TAIL_MS", "350"))
+PLAYBACK_GUARD_FLOOR_RMS = int(os.getenv("CLIENT_PLAYBACK_GUARD_FLOOR_RMS", "400"))
 PLAYBACK_GUARD_ECHO_MAX_RATIO = float(os.getenv("CLIENT_PLAYBACK_GUARD_ECHO_MAX_RATIO", "0.55"))
 PLAYBACK_GUARD_MIC_FLOOR_RMS = int(os.getenv("CLIENT_PLAYBACK_GUARD_MIC_FLOOR_RMS", "900"))
-PLAYBACK_GUARD_BARGE_IN_RATIO = float(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_RATIO", "1.20"))
-PLAYBACK_GUARD_BARGE_IN_RMS = int(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_RMS", "2200"))
+PLAYBACK_GUARD_BARGE_IN_RATIO = float(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_RATIO", "1.15"))
+PLAYBACK_GUARD_BARGE_IN_RMS = int(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_RMS", "1800"))
 PLAYBACK_GUARD_BARGE_IN_CHUNKS = int(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_CHUNKS", "2"))
-PLAYBACK_GUARD_BARGE_IN_HOLD_MS = int(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_HOLD_MS", "900"))
+PLAYBACK_GUARD_BARGE_IN_HOLD_MS = int(os.getenv("CLIENT_PLAYBACK_GUARD_BARGE_IN_HOLD_MS", "700"))
+PLAYBACK_GUARD_PREROLL_MS = int(os.getenv("CLIENT_PLAYBACK_GUARD_PREROLL_MS", "300"))
 
 
 class CompanionRuntime:
@@ -78,6 +80,7 @@ class CompanionRuntime:
         self._playback_guard = PlaybackGuard(
             PlaybackGuardConfig(
                 playback_tail_ms=PLAYBACK_GUARD_TAIL_MS,
+                playback_floor_rms=PLAYBACK_GUARD_FLOOR_RMS,
                 echo_max_ratio=PLAYBACK_GUARD_ECHO_MAX_RATIO,
                 mic_floor_rms=PLAYBACK_GUARD_MIC_FLOOR_RMS,
                 barge_in_ratio=PLAYBACK_GUARD_BARGE_IN_RATIO,
@@ -87,6 +90,9 @@ class CompanionRuntime:
             )
         )
         self._playback_guard_drop_active = False
+        self._playback_guard_preroll: deque[bytes] = deque(
+            maxlen=max(1, PLAYBACK_GUARD_PREROLL_MS // CHUNK_MS)
+        )
         self._client_trace_lock = threading.Lock()
         self._pending_client_traces: deque[dict[str, object]] = deque(maxlen=CLIENT_TRACE_MAX_BACKLOG)
         self.state.set_local_trace_listener(self._queue_client_trace)
@@ -166,6 +172,7 @@ class CompanionRuntime:
                     self._audio_gate_open = True
                     self._playback_guard.reset()
                     self._playback_guard_drop_active = False
+                    self._playback_guard_preroll.clear()
                     self.state.set_connected(True)
                     self.state.record_local_event(
                         request_id=self.state.session_id,
@@ -296,10 +303,13 @@ class CompanionRuntime:
                     continue
                 decision = self._playback_guard.should_send_mic_chunk(chunk, now=time.time())
                 if not decision.send:
+                    self._playback_guard_preroll.append(chunk)
                     self._record_playback_guard_drop(decision.mic_rms, decision.playback_rms)
                     continue
                 self._playback_guard_drop_active = False
                 if decision.reason == "barge_in_detected":
+                    while self._playback_guard_preroll:
+                        await sender.send_bytes("mic_chunk", self._playback_guard_preroll.popleft())
                     self.state.record_local_event(
                         request_id=self.state.session_id,
                         event="playback_guard_interrupt",
@@ -309,6 +319,8 @@ class CompanionRuntime:
                             f"playback_rms={decision.playback_rms}"
                         ),
                     )
+                else:
+                    self._playback_guard_preroll.clear()
                 await sender.send_bytes("mic_chunk", chunk)
         self._mic_queue = None
 
@@ -348,6 +360,7 @@ class CompanionRuntime:
             self._audio_gate_open = False
             self._drain_mic_queue()
             self._playback_guard_drop_active = False
+            self._playback_guard_preroll.clear()
             self.state.record_local_event(
                 request_id=self.state.session_id,
                 event="audio_gate_closed",
@@ -358,6 +371,7 @@ class CompanionRuntime:
         if state == "open":
             self._audio_gate_open = True
             self._playback_guard_drop_active = False
+            self._playback_guard_preroll.clear()
             self.state.record_local_event(
                 request_id=self.state.session_id,
                 event="audio_gate_opened",

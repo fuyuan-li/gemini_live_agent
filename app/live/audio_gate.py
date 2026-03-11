@@ -16,6 +16,9 @@ class SessionAudioGate:
     target_agent: Optional[str] = None
     speech_active: bool = False
     silence_started_at: Optional[float] = None
+    playback_active_until: float = 0.0
+    playback_rms: int = 0
+    interrupt_streak: int = 0
     reopen_task: Optional[asyncio.Task[None]] = None
 
 

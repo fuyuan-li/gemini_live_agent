@@ -7,12 +7,13 @@ from dataclasses import dataclass
 @dataclass
 class PlaybackGuardConfig:
     playback_tail_ms: int = 350
+    playback_floor_rms: int = 400
     echo_max_ratio: float = 0.55
     mic_floor_rms: int = 900
-    barge_in_ratio: float = 1.20
-    barge_in_rms: int = 2200
+    barge_in_ratio: float = 1.15
+    barge_in_rms: int = 1800
     barge_in_chunks: int = 2
-    barge_in_hold_ms: int = 900
+    barge_in_hold_ms: int = 700
 
 
 @dataclass
@@ -39,10 +40,15 @@ class PlaybackGuard:
 
     def note_playback_chunk(self, chunk: bytes, *, now: float) -> int:
         rms = pcm16_rms(chunk)
-        if rms > 0:
-            self.last_playback_rms = rms
+        if rms >= self.config.playback_floor_rms:
+            if now >= self.playback_active_until:
+                self.last_playback_rms = rms
+            else:
+                self.last_playback_rms = max(self.last_playback_rms, rms)
             tail_s = self.config.playback_tail_ms / 1000.0
             self.playback_active_until = max(self.playback_active_until, now + tail_s)
+        elif now >= self.playback_active_until:
+            self.last_playback_rms = 0
         return rms
 
     def should_send_mic_chunk(self, chunk: bytes, *, now: float) -> PlaybackDecision:
@@ -58,6 +64,7 @@ class PlaybackGuard:
             )
 
         if now >= self.playback_active_until or playback_rms <= 0:
+            self.last_playback_rms = 0
             self.barge_in_streak = 0
             return PlaybackDecision(
                 send=True,
