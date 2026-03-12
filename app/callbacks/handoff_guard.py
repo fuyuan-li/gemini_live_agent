@@ -33,8 +33,6 @@ async def reopen_transfer_audio_gate(
         gate.allow_audio_upload = True
         gate.handoff_pending = False
         gate.target_agent = None
-        gate.speech_active = False
-        gate.silence_started_at = None
 
     bridge = await get_bridge(user_id, session_id)
     if bridge is not None:
@@ -69,8 +67,6 @@ async def clear_transfer_audio_gate(
         gate.allow_audio_upload = True
         gate.handoff_pending = False
         gate.target_agent = None
-        gate.speech_active = False
-        gate.silence_started_at = None
 
     if task is not None and not task.done():
         task.cancel()
@@ -100,15 +96,10 @@ async def transfer_audio_gate_before_tool_callback(
     async with gate.lock:
         task = gate.reopen_task
         gate.reopen_task = None
-        was_speech_active = gate.speech_active
         gate.allow_audio_upload = False
         gate.handoff_pending = True
         gate.target_agent = target_agent
-        gate.speech_active = False
-        gate.silence_started_at = None
-        dropped = gate.queue.drop_realtime_backlog()
-        if was_speech_active or dropped:
-            gate.queue.send_activity_end()
+        gate.queue.drop_realtime_backlog()
         gate.reopen_task = asyncio.create_task(
             _reopen_after_transfer_delay(user_id=user_id, session_id=session_id)
         )
@@ -127,11 +118,10 @@ async def transfer_audio_gate_before_tool_callback(
         )
 
     logger.info(
-        "[transfer.guard] closed audio gate user=%s session=%s target=%s dropped=%s",
+        "[transfer.guard] closed audio gate user=%s session=%s target=%s",
         user_id,
         session_id,
         target_agent,
-        dropped,
     )
     return None
 

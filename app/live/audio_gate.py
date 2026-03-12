@@ -14,8 +14,6 @@ class SessionAudioGate:
     allow_audio_upload: bool = True
     handoff_pending: bool = False
     target_agent: Optional[str] = None
-    speech_active: bool = False
-    silence_started_at: Optional[float] = None
     reopen_task: Optional[asyncio.Task[None]] = None
 
 

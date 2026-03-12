@@ -1,6 +1,5 @@
 # app/server.py
 import asyncio
-import audioop
 import json
 import logging
 import os
@@ -46,8 +45,6 @@ AUDIO_LOG_EVERY_CHUNKS = int(os.getenv("AUDIO_LOG_EVERY_CHUNKS", "20"))
 CURSOR_TRACE_INTERVAL_S = float(os.getenv("CURSOR_TRACE_INTERVAL_S", "1.0"))
 CURSOR_TRACE_MIN_DELTA_PX = int(os.getenv("CURSOR_TRACE_MIN_DELTA_PX", "24"))
 EXPECTED_AUDIO_CHUNK_BYTES = 3200
-MANUAL_VAD_RMS_THRESHOLD = int(os.getenv("MANUAL_VAD_RMS_THRESHOLD", "250"))
-MANUAL_VAD_SILENCE_MS = int(os.getenv("MANUAL_VAD_SILENCE_MS", "500"))
 logger = logging.getLogger("app.server.live")
 
 
@@ -142,7 +139,12 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
         realtime_input_config=types.RealtimeInputConfig(
-            automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                prefix_padding_ms=200,
+                silence_duration_ms=800,
+            ),
             activity_handling=types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
         ),
     )
@@ -159,7 +161,6 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
             audio_chunk_count = 0
             audio_bytes_total = 0
             dropped_audio_chunk_count = 0
-            activity_count = 0
             last_cursor_trace_ts = 0.0
             last_logged_cursor: tuple[int, int] | None = None
             while True:
@@ -184,8 +185,6 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                             f"user={user_id} session={session_id} chunks={audio_chunk_count} "
                             f"total_bytes={audio_bytes_total} last_chunk={len(b)}"
                         )
-                    now = time.time()
-                    rms = int(audioop.rms(b, 2))
                     async with audio_gate.lock:
                         if not audio_gate.allow_audio_upload:
                             dropped_audio_chunk_count += 1
@@ -196,34 +195,7 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                                     f"handoff_pending={audio_gate.handoff_pending} target={audio_gate.target_agent}"
                                 )
                             continue
-
-                        blob = types.Blob(mime_type=INPUT_MIME, data=b)
-                        is_speech = rms >= MANUAL_VAD_RMS_THRESHOLD
-                        if audio_gate.speech_active:
-                            queue.send_realtime(blob)
-                            if is_speech:
-                                audio_gate.silence_started_at = None
-                            else:
-                                if audio_gate.silence_started_at is None:
-                                    audio_gate.silence_started_at = now
-                                elif (now - audio_gate.silence_started_at) * 1000 >= MANUAL_VAD_SILENCE_MS:
-                                    queue.send_activity_end()
-                                    audio_gate.speech_active = False
-                                    audio_gate.silence_started_at = None
-                                    _cloud_info(
-                                        "[upstream.audio] activity_end "
-                                        f"user={user_id} session={session_id} rms={rms}"
-                                    )
-                        elif is_speech:
-                            queue.send_activity_start()
-                            queue.send_realtime(blob)
-                            audio_gate.speech_active = True
-                            audio_gate.silence_started_at = None
-                            activity_count += 1
-                            _cloud_info(
-                                "[upstream.audio] activity_start "
-                                f"user={user_id} session={session_id} count={activity_count} rms={rms}"
-                            )
+                        queue.send_realtime(types.Blob(mime_type=INPUT_MIME, data=b))
                     continue
 
                 # control text (cursor)

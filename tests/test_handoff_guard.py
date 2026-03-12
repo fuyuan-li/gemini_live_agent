@@ -47,7 +47,7 @@ def test_transfer_guard_closes_audio_gate_and_notifies_client() -> None:
     async def scenario() -> None:
         queue = ResettableLiveRequestQueue()
         queue.send_realtime(types.Blob(mime_type="audio/pcm;rate=16000", data=b"123"))
-        gate = SessionAudioGate(queue=queue, speech_active=True)
+        gate = SessionAudioGate(queue=queue)
         ws = _FakeWebSocket()
         bridge = await register_bridge("user-1", "session-1", ws)
         register_audio_gate("user-1", "session-1", gate)
@@ -65,8 +65,6 @@ def test_transfer_guard_closes_audio_gate_and_notifies_client() -> None:
             assert gate.reopen_task is not None
             assert len(ws.text_frames) == 1
             assert json.loads(ws.text_frames[0])["type"] == "audio_gate"
-            queued = queue._queue.get_nowait()
-            assert queued.activity_end is not None
             assert queue._queue.empty()
             await clear_transfer_audio_gate(user_id="user-1", session_id="session-1")
         finally:
