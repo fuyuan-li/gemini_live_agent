@@ -43,7 +43,7 @@ browser_agent = Agent(
         "6) If user says 'click here/right there': use remote_click_here().\n"
         "7) If user says 'drag from here to the left/right/up/down': use remote_drag_here(dx,dy).\n"
         "8) Short confirmations are fine for browser actions, but do not chat outside your browser scope.\n"
-        "9) Examples that should transfer to concierge: thanks, opinions, jokes, general questions, and requests to switch back to the main assistant.\n"
+        "9) Examples that should transfer to concierge: thanks, opinions, jokes, factual questions, search requests, current events, and requests to switch back to the main assistant.\n"
     ),
     before_tool_callback=[
         echo_dedupe_before_tool_callback,

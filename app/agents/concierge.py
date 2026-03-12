@@ -1,5 +1,6 @@
 from google.adk.agents import Agent
 from .browser_agent import browser_agent
+from .search_agent import search_agent
 from app.callbacks.echo_dedupe import echo_dedupe_before_tool_callback
 from app.callbacks.handoff_guard import transfer_audio_gate_before_tool_callback
 
@@ -12,12 +13,13 @@ root_agent = Agent(
     instruction=(
         "You are the default voice-first concierge and overall conversation owner. Keep responses short and conversational. "
         "If the user asks to browse, open a website, click/zoom/scroll somewhere, or refers to 'here/right there', delegate to browser_agent. "
-        "If the current conversation is no longer about browser control, handle it yourself. "
+        "If the user asks a factual question, wants to search for something, or asks about current events/news, delegate to search_agent. "
+        "If the current conversation is no longer about browser control or search, handle it yourself. "
         "After opening, tell the user what you opened."
     ),
     before_tool_callback=[
         echo_dedupe_before_tool_callback,
         transfer_audio_gate_before_tool_callback,
     ],
-    sub_agents=[browser_agent],
+    sub_agents=[browser_agent, search_agent],
 )
