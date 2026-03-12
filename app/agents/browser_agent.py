@@ -1,7 +1,7 @@
 from google.adk.agents import Agent
 
-from .echo_dedupe import echo_dedupe_before_tool_callback
-from .handoff_guard import transfer_audio_gate_before_tool_callback
+from app.callbacks.echo_dedupe import echo_dedupe_before_tool_callback
+from app.callbacks.handoff_guard import transfer_audio_gate_before_tool_callback
 from app.tools.remote_browser import (
     remote_navigate,
     remote_pan,

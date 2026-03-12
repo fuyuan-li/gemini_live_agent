@@ -126,8 +126,6 @@ def _get_cursor_from_state(tool_context: ToolContext) -> Optional[Tuple[int, int
     """
     current_session_state = tool_context.state or {}
     cur = current_session_state.get("cursor")
-    print(f"[tool] Retrieved session state from tool_context.session: {current_session_state.to_dict()}")
-    print(f"[tool] cursor raw = {cur}")
     if not isinstance(cur, dict):
         return None
     x = cur.get("x")
@@ -135,27 +133,6 @@ def _get_cursor_from_state(tool_context: ToolContext) -> Optional[Tuple[int, int
     if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
         return None
     return int(x), int(y)
-
-
-async def _cursor_screen_to_viewport(tool_context: ToolContext) -> Optional[Tuple[int, int]]:
-    """
-    Convert OS screen coords -> Playwright viewport coords using runtime window mapping.
-    """
-    cur =  _get_cursor_from_state(tool_context)
-    if cur is None:
-        return None
-
-    geometry = await refresh_browser_geometry()
-    origin_x, origin_y = geometry.viewport_origin
-    print(f"[tool] origin= {origin_x, origin_y}, cur={dir(cur)}")
-
-    vx = int(cur[0] - origin_x)
-    vy = int(cur[1] - origin_y)
-
-    vp_w, vp_h = geometry.viewport_size
-    vx = max(0, min(vx, int(vp_w) - 1))
-    vy = max(0, min(vy, int(vp_h) - 1))
-    return vx, vy
 
 
 async def screen_to_viewport(

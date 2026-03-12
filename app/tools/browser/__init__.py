@@ -1,6 +1,5 @@
 # app/tools/browser/__init__.py
 from .navigation import navigate
-from .vision import screenshot_base64
 from .mouse import (
     click,
     drag,
@@ -13,7 +12,6 @@ from .mouse import (
 
 __all__ = [
     "navigate",
-    "screenshot_base64",
     "click",
     "drag",
     "scroll",

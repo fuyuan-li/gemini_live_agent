@@ -16,14 +16,14 @@ from google.adk.events import Event, EventActions
 from google.genai.errors import APIError
 import traceback
 
-from app.agents.handoff_guard import clear_transfer_audio_gate
+from app.callbacks.handoff_guard import clear_transfer_audio_gate
 from app.live.audio_gate import SessionAudioGate
 from app.live.audio_gate import register_audio_gate
 from app.live.audio_gate import unregister_audio_gate
 from app.live.resettable_queue import ResettableLiveRequestQueue
-from app.state.realtime_pointer import set_cursor
+from app.runtime.realtime_pointer import set_cursor
 from .agents import root_agent
-from .agents.echo_dedupe import LATEST_MODEL_OUTPUT_KEY, LATEST_USER_INPUT_KEY
+from app.callbacks.echo_dedupe import LATEST_MODEL_OUTPUT_KEY, LATEST_USER_INPUT_KEY
 from app.live.trace import log_trace_event, make_cursor_ack, parse_trace_payload
 from app.runtime.genai_ws_sniffer import get_last_outbound, get_recent_outbound, record_outbound
 from app.runtime.cursor_payload import parse_cursor_payload
@@ -413,38 +413,10 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                             )
                         await bridge.send_bytes(data)
 
-        except APIError as e:
-            # This is the key "PRINT PRINT PRINT"
-            last = get_last_outbound()
-            recent = get_recent_outbound()
-            await clear_transfer_audio_gate(user_id=user_id, session_id=session_id)
-            await emit_server_trace(
-                user_id=user_id,
-                session_id=session_id,
-                request_id=session_id,
-                event="session_error",
-                status="error",
-                summary=f"APIError status={getattr(e, 'status_code', None)} {e}",
-                agent_name=root_agent.name,
-            )
-            _cloud_info(
-                "[downstream] APIError "
-                f"user={user_id} session={session_id} status_code={getattr(e, 'status_code', None)} message={e}"
-            )
-            _cloud_info(f"[downstream] recent outbound frames to Gemini: {recent}")
-            print(f"[downstream] APIError: status_code={getattr(e, 'status_code', None)} message={e}")
-            print(f"[downstream] LAST OUTBOUND (server->Gemini): {last}")
-            traceback.print_exc()
-            try:
-                await websocket.close(code=1011, reason="live_api_error")
-            except Exception:
-                pass
-            # re-raise so gather can see it (or swallow if you want)
-            raise
-
         except Exception as e:
             last = get_last_outbound()
             recent = get_recent_outbound()
+            is_api_error = isinstance(e, APIError)
             await clear_transfer_audio_gate(user_id=user_id, session_id=session_id)
             await emit_server_trace(
                 user_id=user_id,
@@ -452,18 +424,27 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                 request_id=session_id,
                 event="session_error",
                 status="error",
-                summary=f"{type(e).__name__}: {e}",
+                summary=(
+                    f"APIError status={getattr(e, 'status_code', None)} {e}"
+                    if is_api_error
+                    else f"{type(e).__name__}: {e}"
+                ),
                 agent_name=root_agent.name,
             )
-            _cloud_info(
-                f"[downstream] Unexpected exception user={user_id} session={session_id}: {type(e).__name__}: {e}"
-            )
+            if is_api_error:
+                _cloud_info(
+                    "[downstream] APIError "
+                    f"user={user_id} session={session_id} status_code={getattr(e, 'status_code', None)} message={e}"
+                )
+            else:
+                _cloud_info(
+                    f"[downstream] Unexpected exception user={user_id} session={session_id}: {type(e).__name__}: {e}"
+                )
             _cloud_info(f"[downstream] recent outbound frames to Gemini: {recent}")
-            print(f"[downstream] Unexpected exception: {type(e).__name__}: {e}")
             print(f"[downstream] LAST OUTBOUND (server->Gemini): {last}")
             traceback.print_exc()
             try:
-                await websocket.close(code=1011, reason="downstream_error")
+                await websocket.close(code=1011, reason="live_api_error" if is_api_error else "downstream_error")
             except Exception:
                 pass
             raise

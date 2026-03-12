@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Optional
 
@@ -10,6 +11,7 @@ LATEST_MODEL_OUTPUT_KEY = "latest_model_output"
 LATEST_USER_INPUT_KEY = "latest_user_input"
 _TRAILING_PUNCT_RE = re.compile(r"[\s\.,!?;:'\"`]+$")
 _WHITESPACE_RE = re.compile(r"\s+")
+logger = logging.getLogger("app.callbacks.echo_dedupe")
 
 
 def normalize_echo_text(value: Optional[str]) -> str:
@@ -49,11 +51,16 @@ async def echo_dedupe_before_tool_callback(tool, args: dict[str, Any], tool_cont
         },
     )
     log_trace_event(event)
-    print(
+    logger.info(
         "[tool_deduped] "
-        f"user={tool_context.user_id} session={tool_context.session.id} "
-        f"agent={tool_context.agent_name} tool={tool.name} reason=echo_deduped "
-        f"latest_model_output={latest_model_output!r} latest_user_input={latest_user_input!r}"
+        "user=%s session=%s agent=%s tool=%s reason=echo_deduped "
+        "latest_model_output=%r latest_user_input=%r",
+        tool_context.user_id,
+        tool_context.session.id,
+        tool_context.agent_name,
+        tool.name,
+        latest_model_output,
+        latest_user_input,
     )
     return {
         "ok": True,

@@ -3,9 +3,9 @@ import json
 
 from google.genai import types
 
-from app.agents.handoff_guard import clear_transfer_audio_gate
-from app.agents.handoff_guard import reopen_transfer_audio_gate
-from app.agents.handoff_guard import transfer_audio_gate_before_tool_callback
+from app.callbacks.handoff_guard import clear_transfer_audio_gate
+from app.callbacks.handoff_guard import reopen_transfer_audio_gate
+from app.callbacks.handoff_guard import transfer_audio_gate_before_tool_callback
 from app.live.audio_gate import SessionAudioGate
 from app.live.audio_gate import register_audio_gate
 from app.live.audio_gate import unregister_audio_gate

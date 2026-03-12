@@ -13,7 +13,7 @@ from app.runtime.session_bridge import get_bridge
 TRANSFER_AUDIO_GATE_REOPEN_DELAY_S = float(
     os.getenv("TRANSFER_AUDIO_GATE_REOPEN_DELAY_S", "1.25")
 )
-logger = logging.getLogger("app.agents.handoff_guard")
+logger = logging.getLogger("app.callbacks.handoff_guard")
 
 
 async def reopen_transfer_audio_gate(

@@ -2,13 +2,13 @@ import asyncio
 
 from app.agents.browser_agent import browser_agent
 from app.agents.concierge import root_agent
-from app.agents.echo_dedupe import (
+from app.callbacks.echo_dedupe import (
     LATEST_MODEL_OUTPUT_KEY,
     LATEST_USER_INPUT_KEY,
     echo_dedupe_before_tool_callback,
     is_echo_replay,
 )
-from app.agents.handoff_guard import transfer_audio_gate_before_tool_callback
+from app.callbacks.handoff_guard import transfer_audio_gate_before_tool_callback
 
 
 class _FakeSession:
