@@ -25,5 +25,8 @@ pyobjc-framework-Quartz==12.1
 opencv-python>=4.10.0
 mediapipe>=0.10.14
 
+# Screenshot / image processing
+Pillow>=10.0
+
 # Test tooling
 pytest>=9.0.0
