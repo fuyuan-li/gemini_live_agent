@@ -13,7 +13,7 @@ from app.tools.remote_tts import speak_text
 from app.tools.remote_vision import remote_screenshot
 
 
-MODEL = "gemini-2.0-flash-exp"
+MODEL = "gemini-2.5-flash-native-audio-latest"
 
 browser_agent = Agent(
     name="browser_agent",
