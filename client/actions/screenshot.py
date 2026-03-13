@@ -29,6 +29,8 @@ def _capture(cursor_x: Optional[int], cursor_y: Optional[int], max_width: int) -
         if cursor_y is not None:
             cursor_y = int(cursor_y * ratio)
 
+    img = img.convert("RGB")
+
     if cursor_x is not None and cursor_y is not None:
         draw = ImageDraw.Draw(img)
         r = 18

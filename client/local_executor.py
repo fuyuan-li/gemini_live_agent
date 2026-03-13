@@ -12,6 +12,7 @@ from app.tools.browser.mouse import (
 )
 from app.tools.browser.navigation import navigate
 from client.actions.screenshot import take_screenshot
+from client.actions.tts import speak_text_locally
 from client.cursor.provider import CursorProvider
 from client.ws_guard import WSSender
 
@@ -161,6 +162,10 @@ class LocalToolExecutor:
             cursor_x = args.get("cursor_x")
             cursor_y = args.get("cursor_y")
             return await take_screenshot(cursor_x=cursor_x, cursor_y=cursor_y)
+
+        if tool == "tts":
+            text = args.get("text", "")
+            return await speak_text_locally(text)
 
         raise RuntimeError(f"Unknown tool: {tool}")
 
