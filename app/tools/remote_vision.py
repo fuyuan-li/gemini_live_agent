@@ -44,8 +44,13 @@ async def remote_screenshot(tool_context: ToolContext) -> dict:
         raw = base64.b64decode(result["data"])
         gate.queue.send_realtime(types.Blob(mime_type="image/jpeg", data=raw))
 
-    return {
+    response: dict = {
         "status": "screenshot captured",
         "width": result.get("width"),
         "height": result.get("height"),
     }
+    if cursor:
+        response["cursor_x"] = cursor["x"]
+        response["cursor_y"] = cursor["y"]
+        response["note"] = "The screenshot has been annotated with a cursor marker at the above coordinates. Describe what is at or near the cursor, not the whole screen."
+    return response

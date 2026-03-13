@@ -9,7 +9,6 @@ from app.tools.remote_browser import (
     remote_scroll_here,
     remote_drag_here,
 )
-from app.tools.remote_tts import speak_text
 from app.tools.remote_vision import remote_screenshot
 
 
@@ -34,23 +33,21 @@ browser_agent = Agent(
         "- remote_click_here(): click at the user's current pointer position.\n"
         "- remote_scroll_here(delta_y, delta_x=0): wheel at the user's current cursor position.\n"
         "- remote_drag_here(dx, dy): drag starting at cursor by offsets.\n"
-        "- remote_screenshot(): capture the user's screen. Use this when the user asks 'what is this?', 'what's on screen?', 'what do you see?', or any screen question.\n"
-        "- speak_text(text): speak a message aloud on the user's machine. Use this to confirm actions or describe what you see.\n\n"
+        "- remote_screenshot(): capture the user's screen. Use this when the user asks 'what is this?', 'what's on screen?', 'what do you see?', or any screen question.\n\n"
         "RULES:\n"
         "1) If the request is not browser control, transfer to concierge. Examples that should transfer: thanks, opinions, jokes, general chat.\n"
-        "2) If user asks to open a page/site: remote_navigate(url), then speak_text to confirm.\n"
+        "2) If user asks to open a page/site: remote_navigate(url), then confirm verbally.\n"
         "3) If user says 'scroll up/down': use remote_scroll_here(delta_y=...)\n"
         "4) If user says 'zoom in/out here' / 'zoom this area' / 'right there': use remote_scroll_here().\n"
         "   - zoom in  => remote_scroll_here(delta_y=-600)\n"
         "   - zoom out => remote_scroll_here(delta_y=+600)\n"
         "5) If user says 'click here/right there': use remote_click_here().\n"
         "6) If user says 'drag from here to the left/right/up/down': use remote_drag_here(dx,dy).\n"
-        "7) If user asks 'what is this?', 'what's on screen?', 'what do you see?', or similar: call remote_screenshot(), then call speak_text() with a description of what you see. Do NOT transfer to concierge for screen questions.\n"
-        "8) When responding to the user (confirmations, status), call speak_text('your message') to speak it aloud.\n"
+        "7) If user asks 'what is this?', 'what's here?', 'what am I pointing at?', or similar: call remote_screenshot(). The screenshot is annotated with a cursor marker and the tool response includes cursor_x/cursor_y. Describe only what is at or immediately around the cursor marker — not the whole screen. Do NOT transfer to concierge for screen questions.\n"
     ),
     before_tool_callback=[
         echo_dedupe_before_tool_callback,
         transfer_audio_gate_before_tool_callback,
     ],
-    tools=[remote_navigate, remote_pan, remote_click_here, remote_scroll_here, remote_drag_here, remote_screenshot, speak_text],
+    tools=[remote_navigate, remote_pan, remote_click_here, remote_scroll_here, remote_drag_here, remote_screenshot],
 )
