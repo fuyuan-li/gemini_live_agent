@@ -29,6 +29,8 @@ CHUNK_SAMPLES = int(IN_RATE * CHUNK_MS / 1000)
 RECONNECT_DELAY_S = 2.0
 # Echo gate: suppress mic until TTS audio finishes playing (+ this tail)
 TTS_TAIL_S = 0.5
+# After AEC, residual above this RMS = user is talking over agent (barge-in)
+BARGE_IN_RMS = 300
 CLIENT_TRACE_EVENTS = {
     "camera_started",
     "session_connected",
@@ -276,10 +278,15 @@ class CompanionRuntime:
                     continue
                 if not self._audio_gate_open:
                     continue
-                # Energy gate: suppress echo while TTS audio is still playing
+                # During TTS playback: run AEC to cancel echo, only pass if residual is loud
                 if time.monotonic() < self._tts_play_until:
-                    continue  # full suppression while TTS playing; AEC handles barge-in
-                chunk = self._aec.process(chunk)
+                    chunk = self._aec.process(chunk)
+                    rms = float(np.sqrt(np.mean(np.frombuffer(chunk, dtype=np.int16).astype(np.float32) ** 2)))
+                    if rms < BARGE_IN_RMS:
+                        continue  # echo cancelled cleanly — not a barge-in
+                    print(f"[barge-in] rms={rms:.0f} after AEC")
+                else:
+                    chunk = self._aec.process(chunk)
                 await sender.send_bytes("mic_chunk", chunk)
         self._mic_queue = None
 

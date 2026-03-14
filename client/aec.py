@@ -32,11 +32,7 @@ class AcousticEchoCanceller:
         self._ref_buf = bytearray()
         try:
             from speexdsp import EchoCanceller
-            self._ec = EchoCanceller.create(
-                frame_size=FRAME_SAMPLES,
-                filter_length=FILTER_LENGTH,
-                sample_rate=IN_RATE,
-            )
+            self._ec = EchoCanceller.create(FRAME_SAMPLES, FILTER_LENGTH, IN_RATE)
         except Exception as e:
             print(f"[AEC] init failed: {type(e).__name__}: {e}")
 
@@ -60,8 +56,8 @@ class AcousticEchoCanceller:
             return mic_frame
         need = len(mic_frame)
         if len(self._ref_buf) < need:
-            # Not enough reference yet — return silence to avoid false input
-            return bytes(need)
+            # No reference signal — no TTS playing, pass through as-is
+            return mic_frame
         ref = bytes(self._ref_buf[:need])
         del self._ref_buf[:need]
         try:
