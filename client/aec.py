@@ -37,8 +37,8 @@ class AcousticEchoCanceller:
                 filter_length=FILTER_LENGTH,
                 sample_rate=IN_RATE,
             )
-        except Exception:
-            pass  # speexdsp not available; push_speaker / process become no-ops
+        except Exception as e:
+            print(f"[AEC] init failed: {type(e).__name__}: {e}")
 
     @property
     def active(self) -> bool:
