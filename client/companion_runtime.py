@@ -9,6 +9,7 @@ from typing import Optional
 import sounddevice as sd
 import websockets
 
+from client.aec import AcousticEchoCanceller
 from client.companion_state import CompanionState
 from client.cursor.provider import HandCursorProvider
 from client.local_executor import LocalToolExecutor
@@ -65,6 +66,7 @@ class CompanionRuntime:
         self._client_trace_lock = threading.Lock()
         self._pending_client_traces: deque[dict[str, object]] = deque(maxlen=CLIENT_TRACE_MAX_BACKLOG)
         self.state.set_local_trace_listener(self._queue_client_trace)
+        self._aec = AcousticEchoCanceller()
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -267,6 +269,7 @@ class CompanionRuntime:
                     continue
                 if not self._audio_gate_open:
                     continue
+                chunk = self._aec.process(chunk)
                 await sender.send_bytes("mic_chunk", chunk)
         self._mic_queue = None
 
@@ -284,6 +287,7 @@ class CompanionRuntime:
             async for msg in ws:
                 if isinstance(msg, bytes) and msg:
                     out.write(msg)
+                    self._aec.push_speaker(msg)
                     continue
                 if not isinstance(msg, str):
                     continue

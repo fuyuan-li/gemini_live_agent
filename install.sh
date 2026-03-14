@@ -49,6 +49,17 @@ else
     git clone --quiet "$REPO_URL" "$INSTALL_DIR"
 fi
 
+# ── 2b. speex system library (required for echo cancellation) ────────────────
+if ! command -v brew &>/dev/null; then
+    warn "Homebrew not found; skipping speex system library install."
+    warn "If echo cancellation fails, install Homebrew then re-run this installer."
+else
+    if ! brew list speex &>/dev/null 2>&1; then
+        info "Installing speex system library (required for echo cancellation)..."
+        brew install speex --quiet
+    fi
+fi
+
 # ── 3. Python environment + dependencies ─────────────────────────────────────
 cd "$INSTALL_DIR"
 if [ ! -d ".venv" ]; then

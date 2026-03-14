@@ -28,5 +28,8 @@ mediapipe>=0.10.14
 # Screenshot / image processing
 Pillow>=10.0
 
+# Echo cancellation
+speexdsp>=0.1.1
+
 # Test tooling
 pytest>=9.0.0
