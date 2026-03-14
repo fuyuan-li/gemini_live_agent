@@ -9,7 +9,7 @@ from typing import Optional
 async def take_screenshot(
     cursor_x: Optional[int] = None,
     cursor_y: Optional[int] = None,
-    max_width: int = 1280,
+    max_width: int = 768,
 ) -> dict:
     """
     Capture a JPEG screenshot of the browser viewport, annotating cursor position.
@@ -46,7 +46,9 @@ async def _playwright_screenshot(
     """Screenshot directly from Playwright viewport with cursor annotation."""
     from PIL import Image, ImageDraw  # type: ignore
 
-    raw = await page.screenshot(type="jpeg", quality=75)
+    # Use a reduced scale to stay well under Gemini Live's inline-image size limit.
+    # Full-viewport at 1x produces 300-500KB base64, which triggers error 1007.
+    raw = await page.screenshot(type="jpeg", quality=55, scale="css")
     img = Image.open(io.BytesIO(raw))
 
     # Convert screen-space cursor coords → viewport coords
@@ -78,7 +80,7 @@ async def _playwright_screenshot(
         draw.line([vp_x, vp_y - r, vp_x, vp_y + r], fill="red", width=2)
 
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=75)
+    img.save(buf, format="JPEG", quality=55)
     return {
         "data": base64.b64encode(buf.getvalue()).decode(),
         "mime_type": "image/jpeg",

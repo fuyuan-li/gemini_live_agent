@@ -402,39 +402,37 @@ class CompanionWindowController:
 
     def _build_window(self) -> None:
         screen = _get_builtin_nsscreen()  # always the MacBook's built-in display
-        full_frame = screen.frame()
         visible = screen.visibleFrame()
 
-        sw = int(full_frame.size.width)
-        sh_visible = int(visible.size.height)
         wx = int(visible.origin.x)
         wy = int(visible.origin.y)
         ww = int(visible.size.width)
-        wh = sh_visible - 2  # 2px safety margin so buttons never hide under Dock
-
-        browser_w = ww - PANEL_W
+        wh = int(visible.size.height)
 
         mask = (
             AppKit.NSWindowStyleMaskTitled
             | AppKit.NSWindowStyleMaskClosable
             | AppKit.NSWindowStyleMaskMiniaturizable
         )
-        window_rect = AppKit.NSMakeRect(wx, wy, ww, wh)
+        # IMPORTANT: initWithContentRect: adds a titlebar ON TOP of the content rect,
+        # making the window taller than visibleFrame by ~28px.  The bottom of the
+        # content view then overlaps the Dock.
+        # Fix: create with a dummy rect, then set the WINDOW FRAME (title bar
+        # included) to visibleFrame via setFrame_display_.  AppKit subtracts the
+        # titlebar so the content view exactly fills the space between Dock and
+        # menu bar.
         window = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            window_rect,
+            AppKit.NSMakeRect(0, 0, ww, wh),
             mask,
             AppKit.NSBackingStoreBuffered,
             False,
         )
+        window.setFrame_display_(AppKit.NSMakeRect(wx, wy, ww, wh), False)
         window.setTitle_("Live Agent")
         window.setDelegate_(self._bridge)
         content = window.contentView()
 
-        # ------------------------------------------------------------------
-        # Browser view (left side, full height of content area)
-        # ------------------------------------------------------------------
-        # After window creation, content view height = wh - titlebar (~28px).
-        # We'll use the content frame dimensions for layout.
+        # Content view dimensions after titlebar has been subtracted
         content_frame = content.frame()
         ch = int(content_frame.size.height)
         cw = int(content_frame.size.width)
