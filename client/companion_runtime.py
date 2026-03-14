@@ -73,7 +73,8 @@ class CompanionRuntime:
         self._pending_client_traces: deque[dict[str, object]] = deque(maxlen=CLIENT_TRACE_MAX_BACKLOG)
         self.state.set_local_trace_listener(self._queue_client_trace)
         self._aec = AcousticEchoCanceller()
-        self._tts_last_ts: float = 0.0  # monotonic time of last TTS byte received
+        self._tts_play_until: float = 0.0  # monotonic time when TTS audio will finish playing
+        self._output_latency_s: float = 0.05  # updated when output stream opens
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -277,9 +278,8 @@ class CompanionRuntime:
                     continue
                 if not self._audio_gate_open:
                     continue
-                # Energy gate: suppress echo while TTS is playing or just finished
-                tts_age = time.monotonic() - self._tts_last_ts
-                if tts_age < TTS_TAIL_S:
+                # Energy gate: suppress echo while TTS audio is still playing
+                if time.monotonic() < self._tts_play_until:
                     arr = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
                     rms = float(np.sqrt(np.mean(arr ** 2)))
                     if rms < BARGE_IN_RMS:
@@ -301,11 +301,19 @@ class CompanionRuntime:
             dtype=DTYPE,
             blocksize=0,
         ) as out:
+            lat = out.latency
+            self._output_latency_s = float(lat if isinstance(lat, (int, float)) else lat[1])
+            print(f"[audio] output latency={self._output_latency_s*1000:.1f}ms")
             async for msg in ws:
                 if isinstance(msg, bytes) and msg:
                     out.write(msg)
                     self._aec.push_speaker(msg)
-                    self._tts_last_ts = time.monotonic()
+                    # bytes / (samples/s * bytes/sample) = duration in seconds
+                    duration_s = len(msg) / (OUT_RATE * 2)
+                    self._tts_play_until = max(
+                        self._tts_play_until,
+                        time.monotonic() + duration_s + self._output_latency_s + TTS_TAIL_S,
+                    )
                     continue
                 if not isinstance(msg, str):
                     continue

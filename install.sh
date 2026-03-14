@@ -54,10 +54,12 @@ if ! command -v brew &>/dev/null; then
     warn "Homebrew not found; skipping speex system library install."
     warn "If echo cancellation fails, install Homebrew then re-run this installer."
 else
-    if ! brew list speex &>/dev/null 2>&1; then
-        info "Installing speex system library (required for echo cancellation)..."
-        brew install speex --quiet
-    fi
+    for pkg in speexdsp swig; do
+        if ! brew list "$pkg" &>/dev/null 2>&1; then
+            info "Installing $pkg (required for echo cancellation)..."
+            brew install "$pkg" --quiet
+        fi
+    done
 fi
 
 # ── 3. Python environment + dependencies ─────────────────────────────────────
@@ -67,7 +69,43 @@ if [ ! -d ".venv" ]; then
     "$PY" -m venv .venv
 
     info "Installing Python dependencies (this takes ~1 min the first time)..."
-    .venv/bin/pip install -q -r requirements.txt
+    if command -v brew &>/dev/null && brew list speexdsp &>/dev/null 2>&1; then
+        CPATH="$(brew --prefix speexdsp)/include" LIBRARY_PATH="$(brew --prefix speexdsp)/lib" \
+            .venv/bin/pip install -q -r requirements.txt
+    else
+        .venv/bin/pip install -q -r requirements.txt
+    fi
+
+    # speexdsp 0.1.1 uses `import imp` which was removed in Python 3.12.
+    # Patch the installed glue file to use importlib instead.
+    SPEEXDSP_PY=$(find .venv/lib -path "*/speexdsp/speexdsp.py" 2>/dev/null | head -1)
+    if [ -n "$SPEEXDSP_PY" ] && grep -qE '^        import imp$' "$SPEEXDSP_PY" 2>/dev/null; then
+        info "Patching speexdsp for Python 3.12 compatibility..."
+        .venv/bin/python - "$SPEEXDSP_PY" << 'PYEOF'
+import sys, re
+path = sys.argv[1]
+src = open(path).read()
+patched = re.sub(
+    r'if version_info >= \(2,6,0\):\n    def swig_import_helper\(\):.*?_speexdsp = swig_import_helper\(\)\n    del swig_import_helper',
+    '''if version_info >= (2,6,0):
+    def swig_import_helper():
+        import importlib.util, os
+        pkg_dir = os.path.dirname(__file__)
+        for fname in os.listdir(pkg_dir):
+            if fname.startswith('_speexdsp') and (fname.endswith('.so') or fname.endswith('.pyd')):
+                spec = importlib.util.spec_from_file_location('_speexdsp', os.path.join(pkg_dir, fname))
+                if spec:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    return mod
+        import _speexdsp
+        return _speexdsp
+    _speexdsp = swig_import_helper()
+    del swig_import_helper''',
+    src, flags=re.DOTALL)
+open(path, 'w').write(patched)
+PYEOF
+    fi
 
     info "Downloading Chromium browser (~150 MB)..."
     .venv/bin/python -m playwright install chromium
