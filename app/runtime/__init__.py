@@ -29,10 +29,25 @@ async def refresh_browser_geometry():
     return await _runtime_mod().refresh_browser_geometry()
 
 
+def configure_headless_browser(
+    viewport_width: int,
+    viewport_height: int,
+    origin_x: int,
+    origin_y: int,
+) -> None:
+    _runtime_mod().configure_headless_browser(
+        viewport_width=viewport_width,
+        viewport_height=viewport_height,
+        origin_x=origin_x,
+        origin_y=origin_y,
+    )
+
+
 __all__ = [
     "get_page",
     "get_viewport_origin_screen",
     "refresh_viewport_origin_screen",
     "get_browser_geometry",
     "refresh_browser_geometry",
+    "configure_headless_browser",
 ]

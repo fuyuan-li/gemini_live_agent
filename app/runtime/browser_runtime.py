@@ -1,6 +1,7 @@
 import asyncio
+import base64
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright, CDPSession
 
@@ -36,6 +37,99 @@ class BrowserState:
 _state: Optional[BrowserState] = None
 _lock = asyncio.Lock()
 
+# --- Headless embedded browser configuration ---
+_headless_mode: bool = False
+_viewport_origin_override: Optional[Tuple[int, int]] = None
+_headless_viewport_size: Optional[Tuple[int, int]] = None
+_screencast_frame: Optional[bytes] = None
+_screencast_active: bool = False
+_screencast_frame_callbacks: list[Callable[[bytes], None]] = []
+
+
+def configure_headless_browser(
+    viewport_width: int,
+    viewport_height: int,
+    origin_x: int,
+    origin_y: int,
+) -> None:
+    """
+    Call from companion_app before the browser starts to configure embedded headless mode.
+    viewport_width/height: size of the browser view in logical screen pixels.
+    origin_x/origin_y: top-left of the browser view in Quartz screen coordinates.
+    """
+    global _headless_mode, _viewport_origin_override, _headless_viewport_size
+    _headless_mode = True
+    _viewport_origin_override = (int(origin_x), int(origin_y))
+    _headless_viewport_size = (int(viewport_width), int(viewport_height))
+
+
+def get_latest_screencast_frame() -> Optional[bytes]:
+    """Return the latest JPEG frame from the CDP screencast, or None if not yet available."""
+    return _screencast_frame
+
+
+def add_screencast_frame_callback(cb: Callable[[bytes], None]) -> None:
+    """Register a callback to be called (from the asyncio thread) on each new screencast frame."""
+    _screencast_frame_callbacks.append(cb)
+
+
+async def forward_mouse_click(vp_x: int, vp_y: int) -> None:
+    """Click at viewport coordinates in the headless browser."""
+    if _state is not None:
+        await _state.page.mouse.click(int(vp_x), int(vp_y))
+
+
+async def forward_mouse_move(vp_x: int, vp_y: int) -> None:
+    """Move mouse to viewport coordinates in the headless browser."""
+    if _state is not None:
+        await _state.page.mouse.move(int(vp_x), int(vp_y))
+
+
+async def forward_scroll(vp_x: int, vp_y: int, delta_x: int, delta_y: int) -> None:
+    """Scroll at viewport coordinates in the headless browser."""
+    if _state is not None:
+        await _state.page.mouse.move(int(vp_x), int(vp_y))
+        await _state.page.mouse.wheel(int(delta_x), int(delta_y))
+
+
+async def _start_screencast(cdp: CDPSession, width: int, height: int) -> None:
+    global _screencast_active, _screencast_frame
+
+    if _screencast_active:
+        return
+    _screencast_active = True
+
+    async def _on_frame(event: dict) -> None:
+        global _screencast_frame
+        data = event.get("data", "")
+        if data:
+            try:
+                _screencast_frame = base64.b64decode(data)
+                for cb in _screencast_frame_callbacks:
+                    try:
+                        cb(_screencast_frame)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        session_id = event.get("sessionId")
+        if session_id is not None:
+            try:
+                await cdp.send("Page.screencastFrameAck", {"sessionId": session_id})
+            except Exception:
+                pass
+
+    cdp.on("Page.screencastFrame", _on_frame)
+    try:
+        await cdp.send("Page.startScreencast", {
+            "format": "jpeg",
+            "quality": 75,
+            "maxWidth": width,
+            "maxHeight": height,
+        })
+    except Exception:
+        _screencast_active = False
+
 
 async def _compute_browser_geometry(page: Page, cdp: CDPSession) -> Tuple[BrowserGeometry, int]:
     """
@@ -70,12 +164,16 @@ async def _compute_browser_geometry(page: Page, cdp: CDPSession) -> Tuple[Browse
     vp_w = int(vp["width"])
     vp_h = int(vp["height"])
 
-    # 2) Approximate borders + chrome
-    border_x = max(0, int(round((outer_w - vp_w) / 2)))
-    chrome_top = max(0, outer_h - vp_h - border_x)
-
-    origin_x = left + border_x
-    origin_y = top + chrome_top
+    # 2) Determine viewport origin in screen coordinates.
+    # In headless embedded mode, use the configured override (position of the NSImageView).
+    if _viewport_origin_override is not None:
+        origin_x, origin_y = _viewport_origin_override
+    else:
+        # Approximate borders + chrome for a visible browser window
+        border_x = max(0, int(round((outer_w - vp_w) / 2)))
+        chrome_top = max(0, outer_h - vp_h - border_x)
+        origin_x = left + border_x
+        origin_y = top + chrome_top
 
     window_bounds = WindowBounds(left=left, top=top, width=outer_w, height=outer_h)
     display = get_display_for_rect(left, top, outer_w, outer_h)
@@ -93,6 +191,12 @@ async def get_page(headless: bool = False, viewport: Tuple[int, int] = (1280, 80
     async with _lock:
         if _state is not None:
             return _state.page
+
+        # Headless embedded mode overrides caller's settings
+        if _headless_mode:
+            headless = True
+        if _headless_viewport_size is not None:
+            viewport = _headless_viewport_size
 
         pw = await async_playwright().start()
         browser = await pw.chromium.launch(headless=headless)
@@ -114,6 +218,11 @@ async def get_page(headless: bool = False, viewport: Tuple[int, int] = (1280, 80
             window_id=window_id,
             geometry=geometry,
         )
+
+        # Auto-start screencast in headless embedded mode
+        if _headless_mode:
+            asyncio.create_task(_start_screencast(cdp, viewport[0], viewport[1]))
+
         return page
 
 
@@ -159,7 +268,7 @@ async def refresh_viewport_origin_screen() -> Tuple[int, int]:
 
 
 async def shutdown() -> None:
-    global _state
+    global _state, _screencast_active, _screencast_frame
     async with _lock:
         if _state is None:
             return
@@ -176,3 +285,5 @@ async def shutdown() -> None:
         except Exception:
             pass
         _state = None
+        _screencast_active = False
+        _screencast_frame = None
