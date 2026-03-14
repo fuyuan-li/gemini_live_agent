@@ -1,30 +1,25 @@
 #!/bin/bash
 # Double-click this file in Finder to launch the Live Agent Companion app.
-# On first run, macOS may ask for camera / microphone permission — click Allow.
+# On first run, macOS will ask for Camera and Microphone access — click Allow.
 
 set -e
 
-# Change to the repo directory (works wherever the file is placed)
+# Change to the repo directory regardless of where the file is located
 cd "$(dirname "$0")"
 
-# ── Setup check ─────────────────────────────────────────────────────────────
+# ── One-time setup ───────────────────────────────────────────────────────────
 if [ ! -d ".venv" ]; then
-  echo "Setting up Python environment (one-time setup, ~1 min)..."
-  python3 -m venv .venv
-  source .venv/bin/activate
-  pip install -q -r requirements.txt
-  python -m playwright install chromium
-else
-  source .venv/bin/activate
+    echo "Setting up Python environment (one-time, ~2 min)..."
+    python3 -m venv .venv
+    .venv/bin/pip install -q -r requirements.txt
+    .venv/bin/python -m playwright install chromium
 fi
 
-# ── Config ───────────────────────────────────────────────────────────────────
-# Edit WS_URL below to point at your Cloud Run deployment.
-WS_URL="wss://adk-agent-orchestrator-385929302643.us-central1.run.app/ws/local_user"
+source .venv/bin/activate
 
 # ── Launch ───────────────────────────────────────────────────────────────────
+# --ws-url  Base WebSocket URL (no user-id — it's appended automatically from
+#           your machine's hostname, persisted in ~/.config/companion-agent/user_id)
 echo "Starting Live Agent Companion..."
 python -m client.companion_app \
-  --ws-url "$WS_URL" \
-  --hand-overlay \
-  --hand-mirror
+    --ws-url "wss://adk-agent-orchestrator-385929302643.us-central1.run.app/ws"

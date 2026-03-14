@@ -14,7 +14,7 @@ from client.companion_state import CompanionState, EventEntry
 from client.cursor.displays import get_builtin_display_geometry
 from client.cursor.mapper import get_main_display_size
 from client.cursor.provider import HandCursorProvider
-from client.session_ids import DEFAULT_WS_ROOT_URL, generate_session_id, normalize_ws_root_url
+from client.session_ids import DEFAULT_WS_ROOT_URL, generate_session_id, get_stable_user_id, normalize_ws_root_url
 
 
 def _get_builtin_nsscreen():
@@ -36,7 +36,8 @@ def _get_builtin_nsscreen():
     return AppKit.NSScreen.mainScreen()
 
 
-DEFAULT_WS_URL = DEFAULT_WS_ROOT_URL
+# Cloud Run base URL — no user_id suffix; it is appended automatically.
+DEFAULT_WS_BASE = "wss://adk-agent-orchestrator-385929302643.us-central1.run.app/ws"
 
 PANEL_W = 380  # sidebar width in points
 
@@ -52,7 +53,10 @@ TOP_FIXED = HEADER_H + AGENT_H + WEBCAM_H + CALIB_H + 8  # height consumed at to
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Native macOS companion window for the live voice agent")
-    p.add_argument("--ws-url", default=DEFAULT_WS_URL)
+    p.add_argument("--ws-url", default=DEFAULT_WS_BASE,
+                   help="WebSocket base URL up to and including /ws (user-id appended automatically)")
+    p.add_argument("--user-id", default=None,
+                   help="Stable user ID for this machine (auto-generated from hostname on first run)")
     p.add_argument("--camera-index", type=int, default=0)
     p.add_argument("--hand-smoothing", type=float, default=0.35)
     p.add_argument("--cursor-stale-ms", type=int, default=400)
@@ -234,7 +238,9 @@ class _ControllerBridge(AppKit.NSObject):  # type: ignore[misc, valid-type]
 class CompanionWindowController:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        self.ws_root_url = normalize_ws_root_url(args.ws_url)
+        user_id = args.user_id or get_stable_user_id()
+        full_ws_url = f"{args.ws_url.rstrip('/')}/{user_id}"
+        self.ws_root_url = normalize_ws_root_url(full_ws_url)
         self.state = CompanionState(session_id=generate_session_id())
         self.provider = HandCursorProvider(
             camera_index=args.camera_index,

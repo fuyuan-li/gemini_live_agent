@@ -1,41 +1,94 @@
-# gemini_live_agent
+# Live Agent Companion
 
-A voice-first Gemini ADK agent with Playwright browser tools and pointer-aware "here" actions.
+A voice-first AI assistant with hand-gesture control and an embedded browser — powered by Google Gemini Live and ADK.
 
-## Runtime Split
+> **macOS only.** Requires Python 3.11+, a webcam, and a microphone.
 
-The project now supports a cloud-orchestrated runtime:
+---
 
-- Cloud Run hosts the FastAPI + ADK orchestrator.
-- The local client still owns mic/speaker, cursor tracking, and the visible Playwright browser.
-- Browser actions are forwarded over the existing WebSocket as `tool_call` / `tool_result` JSON messages.
+## Install (end users)
 
-## Setup
+Open Terminal and run:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+curl -fsSL https://raw.githubusercontent.com/fuyuan-li/gemini_live_agent/main/install.sh | bash
+```
+
+The installer will:
+
+1. Clone this repository to `~/.local/share/companion-agent`
+2. Create a Python virtual environment and install all dependencies
+3. Download the Chromium browser (~150 MB, one time only)
+4. Add a `holly` command to your PATH
+
+**First-time duration:** about 2–3 minutes (mostly the Chromium download).
+
+### Start the app
+
+```bash
+holly
+```
+
+On first launch macOS will ask for **Camera** and **Microphone** access — click **Allow** for both.
+
+The app connects automatically to the shared backend at:
+```
+wss://adk-agent-orchestrator-385929302643.us-central1.run.app/ws
+```
+No configuration needed — it just works.
+
+### Update
+
+Re-run the same install command. It will pull the latest code and skip re-downloading dependencies.
+
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `holly: command not found` | Open a new terminal or run `source ~/.zshrc` |
+| Camera / mic not working | System Settings → Privacy & Security → Camera/Microphone → enable Terminal |
+| Stuck on "Connecting…" | Check internet connection; backend runs on Google Cloud Run |
+| Broken after an update | Delete `~/.local/share/companion-agent/.venv`, then re-run the install command |
+
+---
+
+## How it works
+
+| What you do | What happens |
+|-------------|--------------|
+| Speak naturally | Gemini Live transcribes and routes your request |
+| Say "open Google Maps" | The embedded browser navigates automatically |
+| Point your finger at something | The app tracks your hand via webcam |
+| Say "click here" | The AI clicks where your finger is pointing |
+| Say "what is this?" | The AI takes a screenshot and describes what it sees |
+
+Each machine gets a stable unique user ID derived from its hostname (stored in `~/.config/companion-agent/user_id`), so multiple users can connect simultaneously without conflicts.
+
+---
+
+## For developers
+
+```bash
+git clone https://github.com/fuyuan-li/gemini_live_agent.git
+cd gemini_live_agent
+
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
-```
 
-Set env vars:
+# Run (connects to Cloud Run backend)
+python -m client.companion_app
 
-```bash
-export GOOGLE_API_KEY="YOUR_API_KEY"
-```
-
-## Run Server
-
-```bash
+# Run against a local server
 uvicorn app.server:app --host 127.0.0.1 --port 8000
+python -m client.companion_app --ws-url ws://127.0.0.1:8000/ws
 ```
 
-For local client development, keep using `requirements.txt`.
+Hand calibration: follow the cyan ring targets in sequence (Top-Left → Top-Right → Bottom-Right → Bottom-Left). Once calibrated, "click here" and "scroll here" track your finger accurately.
 
-For Cloud Run builds, use the dedicated server dependency set in `requirements-cloud.txt`.
-
-Example deploy:
+### Deploy server to Cloud Run
 
 ```bash
 gcloud run deploy adk-agent-orchestrator \
@@ -44,7 +97,17 @@ gcloud run deploy adk-agent-orchestrator \
   --allow-unauthenticated
 ```
 
-Set `GOOGLE_API_KEY` in the Cloud Run service configuration before invoking the orchestrator remotely.
+Set `GOOGLE_API_KEY` in the Cloud Run service environment variables.
+
+---
+
+## Runtime Split
+
+The project now supports a cloud-orchestrated runtime:
+
+- Cloud Run hosts the FastAPI + ADK orchestrator.
+- The local client still owns mic/speaker, cursor tracking, and the visible Playwright browser.
+- Browser actions are forwarded over the existing WebSocket as `tool_call` / `tool_result` JSON messages.
 
 ## Phase 1: Standalone Webcam Cursor (no voice required)
 
@@ -97,22 +160,6 @@ Useful options:
 - `--cursor-stale-ms 400`
 - `--hand-smoothing 0.35`
 - `--hand-overlay-radius 10`
-
-## Companion App
-
-For hackathon demo mode, run the native macOS companion window instead of the CLI:
-
-```bash
-python client/companion_app.py --ws-url wss://YOUR-CLOUD-RUN-SERVICE/ws/local_user
-```
-
-What it does:
-
-- opens a local companion window with live preview + trace timeline
-- keeps the system overlay dot for "here" interactions
-- auto-connects to the live session and starts streaming mic audio
-- generates a fresh random session id on startup and again before each reconnect
-- renders Cloud Run service / revision / commit metadata from server-side `session_meta`
 
 ## Agent Topology
 

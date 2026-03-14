@@ -1,10 +1,38 @@
 from __future__ import annotations
 
+import pathlib
 import secrets
+import socket
 from urllib.parse import urlparse, urlunparse
 
 
 DEFAULT_WS_ROOT_URL = "ws://127.0.0.1:8000/ws/local_user"
+
+
+def get_stable_user_id() -> str:
+    """
+    Return a stable, unique user ID for this machine.
+
+    On first call the ID is generated from the hostname + 4 random hex bytes
+    and persisted to ~/.config/companion-agent/user_id so every subsequent
+    launch on the same Mac gets the same ID.  This lets the server distinguish
+    users without requiring any sign-in.
+
+    Example: "macbook-pro_a3f29c1b"
+    """
+    config_dir = pathlib.Path.home() / ".config" / "companion-agent"
+    id_file = config_dir / "user_id"
+    if id_file.exists():
+        uid = id_file.read_text().strip()
+        if uid:
+            return uid
+    # Build from hostname (stripped to safe chars) + random suffix
+    raw_host = socket.gethostname().split(".")[0]
+    hostname = "".join(c for c in raw_host.lower() if c.isalnum() or c == "-")[:20]
+    uid = f"{hostname}_{secrets.token_hex(4)}"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    id_file.write_text(uid)
+    return uid
 
 
 def generate_session_id() -> str:
