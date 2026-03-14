@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from collections import deque
 from typing import Optional
 
+import numpy as np
 import sounddevice as sd
 import websockets
 
@@ -25,6 +27,10 @@ DTYPE = "int16"
 CHUNK_MS = 100
 CHUNK_SAMPLES = int(IN_RATE * CHUNK_MS / 1000)
 RECONNECT_DELAY_S = 2.0
+# Echo gate: suppress mic for this many seconds after TTS audio stops arriving
+TTS_TAIL_S = 0.5
+# Barge-in RMS threshold (int16 scale 0-32768); louder = user talking over agent
+BARGE_IN_RMS = 500
 CLIENT_TRACE_EVENTS = {
     "camera_started",
     "session_connected",
@@ -67,6 +73,7 @@ class CompanionRuntime:
         self._pending_client_traces: deque[dict[str, object]] = deque(maxlen=CLIENT_TRACE_MAX_BACKLOG)
         self.state.set_local_trace_listener(self._queue_client_trace)
         self._aec = AcousticEchoCanceller()
+        self._tts_last_ts: float = 0.0  # monotonic time of last TTS byte received
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -270,6 +277,15 @@ class CompanionRuntime:
                     continue
                 if not self._audio_gate_open:
                     continue
+                # Energy gate: suppress echo while TTS is playing or just finished
+                tts_age = time.monotonic() - self._tts_last_ts
+                if tts_age < TTS_TAIL_S:
+                    arr = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
+                    rms = float(np.sqrt(np.mean(arr ** 2)))
+                    if rms < BARGE_IN_RMS:
+                        print(f"[gate] DROPPED  rms={rms:.0f}  (threshold={BARGE_IN_RMS})")
+                        continue  # drop this frame — echo, not user speech
+                    print(f"[gate] PASSED   rms={rms:.0f}  (barge-in)")
                 chunk = self._aec.process(chunk)
                 await sender.send_bytes("mic_chunk", chunk)
         self._mic_queue = None
@@ -289,6 +305,7 @@ class CompanionRuntime:
                 if isinstance(msg, bytes) and msg:
                     out.write(msg)
                     self._aec.push_speaker(msg)
+                    self._tts_last_ts = time.monotonic()
                     continue
                 if not isinstance(msg, str):
                     continue
