@@ -71,6 +71,7 @@ class CompanionRuntime:
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
+        print(f"[AEC] active={self._aec.active}" + ("" if self._aec.active else " (install speexdsp for echo cancellation)"))
         self.state.record_local_event(
             request_id=self.state.session_id,
             event="camera_started",

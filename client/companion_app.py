@@ -238,8 +238,8 @@ class _ControllerBridge(AppKit.NSObject):  # type: ignore[misc, valid-type]
 class CompanionWindowController:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        user_id = args.user_id or get_stable_user_id()
-        full_ws_url = f"{args.ws_url.rstrip('/')}/{user_id}"
+        self.user_id = args.user_id or get_stable_user_id()
+        full_ws_url = f"{args.ws_url.rstrip('/')}/{self.user_id}"
         self.ws_root_url = normalize_ws_root_url(full_ws_url)
         self.state = CompanionState(session_id=generate_session_id())
         self.provider = HandCursorProvider(
@@ -363,11 +363,11 @@ class CompanionWindowController:
             status = "Connected" if snapshot.connected else "Reconnecting..."
             self.connection_label.setStringValue_(dot + status)
         if self.session_label is not None:
-            # Show only the random hex suffix (strip "local_session_" prefix)
             sid = snapshot.session_id
             if "_" in sid:
                 sid = sid.rsplit("_", 1)[-1]
-            self.session_label.setStringValue_(f"session:{sid[:4]}")
+            uid_suffix = self.user_id.rsplit("_", 1)[-1] if "_" in self.user_id else self.user_id[:8]
+            self.session_label.setStringValue_(f"u:{uid_suffix}  s:{sid[:4]}")
 
         # --- Agent / Tool ---
         if self.agent_label is not None:
@@ -392,9 +392,11 @@ class CompanionWindowController:
 
         # --- Debug ---
         if self.debug_text is not None and self.debug_visible:
-            lines = [
+            aec_status = "AEC:active" if self.runtime._aec.active else "AEC:inactive"
+            header = f"user:{self.user_id}  {aec_status}"
+            lines = [header, "─" * 40] + [
                 f"[{e.source}] {e.event} {e.status}  {e.summary[:40]}"
-                for e in list(snapshot.latest_events)[-16:]
+                for e in list(snapshot.latest_events)[-14:]
             ]
             self.debug_text.setString_("\n".join(lines))
 
@@ -505,13 +507,13 @@ class CompanionWindowController:
         # --- 1. Header bar (top 50px) ---
         header_y = ch - HEADER_H
         self.connection_label = _make_label(
-            AppKit.NSMakeRect(pad, header_y + 16, PANEL_W - 120, 22),
+            AppKit.NSMakeRect(pad, header_y + 16, PANEL_W - 150, 22),
             "● Connecting...",
             bold=True,
             font_size=13.0,
         )
         self.session_label = _make_label(
-            AppKit.NSMakeRect(PANEL_W - 110, header_y + 18, 100, 16),
+            AppKit.NSMakeRect(PANEL_W - 145, header_y + 18, 135, 16),
             "",
             font_size=10.0,
             color=AppKit.NSColor.secondaryLabelColor(),
