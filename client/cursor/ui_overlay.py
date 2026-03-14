@@ -7,6 +7,32 @@ import AppKit  # type: ignore
 import Foundation  # type: ignore
 import objc  # type: ignore
 
+from .displays import get_builtin_display_geometry
+
+
+def _builtin_screen_h() -> Optional[int]:
+    """
+    Return the pixel height of the Mac's built-in display.
+    This is stable regardless of which external screen has focus.
+    """
+    try:
+        import Quartz  # type: ignore
+
+        geom = get_builtin_display_geometry()
+        # Cross-check via NSScreen so the unit (points vs pixels) matches AppKit
+        for screen in AppKit.NSScreen.screens():
+            desc = screen.deviceDescription()
+            sid = desc.get("NSScreenNumber")
+            if sid is not None and int(sid) == geom.display_id:
+                return int(screen.frame().size.height)
+    except Exception:
+        pass
+    # Last-resort: use AppKit main screen height
+    main = AppKit.NSScreen.mainScreen()
+    if main is not None:
+        return int(main.frame().size.height)
+    return None
+
 
 class _MacDotView(AppKit.NSView):  # type: ignore[misc, valid-type]
     def initWithFrame_radius_(self, frame, radius: int):
@@ -109,9 +135,7 @@ class _BaseScreenOverlay:
             else:
                 window.orderOut_(None)
 
-            main_screen = AppKit.NSScreen.mainScreen()
-            if main_screen is not None:
-                self._screen_h = int(main_screen.frame().size.height)
+            self._screen_h = _builtin_screen_h()
 
             self._window = window
             self._view = view
@@ -157,9 +181,7 @@ class _BaseScreenOverlay:
             return
         try:
             if self._screen_h is None:
-                main_screen = AppKit.NSScreen.mainScreen()
-                if main_screen is not None:
-                    self._screen_h = int(main_screen.frame().size.height)
+                self._screen_h = _builtin_screen_h()
 
             origin_x = int(self._x - self.radius)
             if self._screen_h is not None:

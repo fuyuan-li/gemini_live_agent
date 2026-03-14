@@ -11,9 +11,29 @@ import objc  # type: ignore
 from app.runtime import browser_runtime
 from client.companion_runtime import CompanionRuntime
 from client.companion_state import CompanionState, EventEntry
+from client.cursor.displays import get_builtin_display_geometry
 from client.cursor.mapper import get_main_display_size
 from client.cursor.provider import HandCursorProvider
 from client.session_ids import DEFAULT_WS_ROOT_URL, generate_session_id, normalize_ws_root_url
+
+
+def _get_builtin_nsscreen():
+    """
+    Return the NSScreen for the Mac's built-in display.
+    Falls back to mainScreen() if no built-in display is detected.
+    """
+    try:
+        import Quartz  # type: ignore
+
+        geom = get_builtin_display_geometry()
+        for screen in AppKit.NSScreen.screens():
+            desc = screen.deviceDescription()
+            sid = desc.get("NSScreenNumber")
+            if sid is not None and int(sid) == geom.display_id:
+                return screen
+    except Exception:
+        pass
+    return AppKit.NSScreen.mainScreen()
 
 
 DEFAULT_WS_URL = DEFAULT_WS_ROOT_URL
@@ -73,29 +93,38 @@ def _ns_image_from_jpeg(jpeg_bytes: bytes):
 
 
 def _format_event_log(events: list[EventEntry]) -> str:
-    lines: list[str] = []
+    # Collapse consecutive speech events of the same type — streaming sends
+    # incremental partials followed by a final complete transcript, so we keep
+    # only the last entry in each consecutive run of user_spoke/agent_spoke.
+    SPEECH = {"user_spoke", "agent_spoke"}
+    collapsed: list[EventEntry] = []
     for e in events:
         if e.event in {"cursor_sent", "cursor_received"}:
             continue
+        if collapsed and collapsed[-1].event == e.event and e.event in SPEECH:
+            collapsed[-1] = e  # replace partial with newer (longer) version
+        else:
+            collapsed.append(e)
+
+    lines: list[str] = []
+    for e in collapsed:
         if e.event == "session_connected":
-            lines.append("● Connected")
+            lines.append("─── connected ───")
         elif e.event == "session_disconnected":
-            lines.append("○ Disconnected")
+            lines.append("─── disconnected ───")
         elif e.event == "session_error":
-            lines.append(f"✗ {e.summary[:60]}")
+            lines.append(f"  ✗ {e.summary[:60]}")
+        elif e.event == "user_spoke":
+            lines.append(f"You: {e.summary}")
+        elif e.event == "agent_spoke":
+            name = e.agent_name or "Agent"
+            lines.append(f"{name}: {e.summary}")
         elif e.event == "agent_started" and e.agent_name:
-            lines.append(f"▶ {e.agent_name}")
-        elif e.event == "audio_gate_closed":
-            lines.append(f"  [agent speaking]")
-        elif e.event == "audio_gate_opened":
-            lines.append(f"  [listening]")
+            lines.append(f"  → {e.agent_name}")
         elif e.tool_name:
             icon = "✓" if e.status == "ok" else "✗"
-            summary = e.summary[:50] if e.summary else ""
-            lines.append(f"  {icon} {e.tool_name}  {summary}")
-        elif e.summary and e.event not in {"cursor_calibration"}:
-            lines.append(f"  {e.summary[:60]}")
-    return "\n".join(lines[-30:])
+            lines.append(f"  {icon} {e.tool_name}: {e.summary[:50]}")
+    return "\n".join(lines[-40:])
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +390,7 @@ class CompanionWindowController:
             self.browser_view.update_image(frame_bytes)
 
     def _build_window(self) -> None:
-        screen = AppKit.NSScreen.mainScreen()
+        screen = _get_builtin_nsscreen()  # always the MacBook's built-in display
         full_frame = screen.frame()
         visible = screen.visibleFrame()
 
@@ -565,7 +594,7 @@ class CompanionWindowController:
         if self.window is None or self.browser_view is None:
             return
 
-        full_frame = AppKit.NSScreen.mainScreen().frame()
+        full_frame = _get_builtin_nsscreen().frame()
         screen_h_pts = int(full_frame.size.height)
 
         win_frame = self.window.frame()
@@ -649,6 +678,11 @@ class _AppDelegate(AppKit.NSObject):  # type: ignore[misc, valid-type]
     def applicationDidFinishLaunching_(self, notification) -> None:
         self.controller = CompanionWindowController(self.args)
         self.controller.start()
+        # Bring window to front after it's been created and shown
+        AppKit.NSApp.activateIgnoringOtherApps_(True)
+        if self.controller.window is not None:
+            self.controller.window.makeKeyAndOrderFront_(None)
+            self.controller.window.orderFrontRegardless()
 
     def applicationWillTerminate_(self, notification) -> None:
         if self.controller is not None:
@@ -658,10 +692,13 @@ class _AppDelegate(AppKit.NSObject):  # type: ignore[misc, valid-type]
 def main() -> None:
     args = build_arg_parser().parse_args()
     app = AppKit.NSApplication.sharedApplication()
+    # Force dark mode regardless of system setting
+    dark = AppKit.NSAppearance.appearanceNamed_("NSAppearanceNameDarkAqua")
+    if dark is not None:
+        app.setAppearance_(dark)
     delegate = _AppDelegate.alloc().initWithArgs_(args)
     app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
     app.setDelegate_(delegate)
-    app.activateIgnoringOtherApps_(True)
     app.run()
 
 

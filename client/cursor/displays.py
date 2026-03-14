@@ -68,6 +68,24 @@ def get_main_display_geometry() -> DisplayGeometry:
     return displays[0]
 
 
+def get_builtin_display_geometry() -> DisplayGeometry:
+    """
+    Return the geometry of the Mac's built-in display (where the camera lives).
+    Falls back to the main display if no built-in display is found.
+    This is stable regardless of which external monitors are connected or focused.
+    """
+    try:
+        import Quartz  # type: ignore
+
+        displays = get_active_displays()
+        for d in displays:
+            if Quartz.CGDisplayIsBuiltin(d.display_id):
+                return d
+    except Exception:
+        pass
+    return get_main_display_geometry()
+
+
 def get_display_for_point(x: int, y: int) -> Optional[DisplayGeometry]:
     for display in get_active_displays():
         if display.contains_point(int(x), int(y)):

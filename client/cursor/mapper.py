@@ -7,7 +7,7 @@ from typing import List, Optional, Sequence, Tuple
 import cv2  # type: ignore
 import numpy as np  # type: ignore
 
-from .displays import get_main_display_geometry
+from .displays import get_builtin_display_geometry, get_main_display_geometry
 from .types import CursorSample
 
 
@@ -20,9 +20,10 @@ class ScreenGeometry:
 
 def get_main_display_size() -> Tuple[int, int]:
     """
-    Return main display size on macOS via Quartz, fallback to 1920x1080.
+    Return the built-in display size (where the camera is), fallback to 1920x1080.
+    Uses CGDisplayIsBuiltin so this is stable regardless of which screen has focus.
     """
-    geom = get_main_display_geometry()
+    geom = get_builtin_display_geometry()
     return geom.width, geom.height
 
 
@@ -34,7 +35,7 @@ class CursorMapper:
         stale_timeout_s: float = 0.4,
     ) -> None:
         if screen_geometry is None:
-            geom = get_main_display_geometry()
+            geom = get_builtin_display_geometry()
             screen_geometry = ScreenGeometry(width=geom.width, height=geom.height, display_id=geom.display_id)
 
         self.screen_geometry = screen_geometry
