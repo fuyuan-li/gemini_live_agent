@@ -271,6 +271,7 @@ class CompanionWindowController:
         self.debug_button = None
         self.debug_scroll = None
         self.debug_text = None
+        self._calib_overlay = None  # shown over browser view during calibration
 
     def start(self) -> None:
         if not self.provider.start():
@@ -304,8 +305,14 @@ class CompanionWindowController:
         self.runtime.request_reconnect()
 
     def recalibrate(self) -> None:
+        if self._calib_overlay is not None:
+            self._calib_overlay.setHidden_(False)
+            # Force immediate redraw so instructions appear before the blocking loop
+            AppKit.NSApp.updateWindows()
         self.state.set_calibration_state("uncalibrated", "Running guided hand calibration...")
         ok, msg = self.provider.run_guided_calibration(announce=self._calibration_announce)
+        if self._calib_overlay is not None:
+            self._calib_overlay.setHidden_(True)
         state = "calibrated" if ok else "uncalibrated"
         self.state.set_calibration_state(state, msg)
         self.state.record_local_event(
@@ -350,7 +357,11 @@ class CompanionWindowController:
             status = "Connected" if snapshot.connected else "Reconnecting..."
             self.connection_label.setStringValue_(dot + status)
         if self.session_label is not None:
-            self.session_label.setStringValue_(snapshot.session_id[:12])
+            # Show only the random hex suffix (strip "local_session_" prefix)
+            sid = snapshot.session_id
+            if "_" in sid:
+                sid = sid.rsplit("_", 1)[-1]
+            self.session_label.setStringValue_(f"session:{sid[:4]}")
 
         # --- Agent / Tool ---
         if self.agent_label is not None:
@@ -399,7 +410,7 @@ class CompanionWindowController:
         wx = int(visible.origin.x)
         wy = int(visible.origin.y)
         ww = int(visible.size.width)
-        wh = sh_visible
+        wh = sh_visible - 2  # 2px safety margin so buttons never hide under Dock
 
         browser_w = ww - PANEL_W
 
@@ -434,6 +445,43 @@ class CompanionWindowController:
         )
         self.browser_view.setOwner_(self)
         content.addSubview_(self.browser_view)
+
+        # ------------------------------------------------------------------
+        # Calibration instruction overlay (covers browser area during calibration)
+        # ------------------------------------------------------------------
+        self._calib_overlay = AppKit.NSView.alloc().initWithFrame_(
+            AppKit.NSMakeRect(0, 0, actual_browser_w, ch)
+        )
+        self._calib_overlay.setWantsLayer_(True)
+        overlay_layer = self._calib_overlay.layer()
+        if overlay_layer is not None:
+            overlay_layer.setBackgroundColor_(
+                AppKit.NSColor.colorWithRed_green_blue_alpha_(0.05, 0.05, 0.08, 0.92).CGColor()
+            )
+
+        calib_title = _make_label(
+            AppKit.NSMakeRect(60, ch // 2 + 10, actual_browser_w - 120, 50),
+            "Hand Calibration",
+            bold=True,
+            font_size=32.0,
+        )
+        calib_title.setAlignment_(AppKit.NSTextAlignmentCenter)
+
+        calib_steps = _make_label(
+            AppKit.NSMakeRect(60, ch // 2 - 80, actual_browser_w - 120, 80),
+            "Follow the cyan ring on screen and hold your fingertip inside it.\n"
+            "Order:  Top-Left  →  Top-Right  →  Bottom-Right  →  Bottom-Left",
+            font_size=18.0,
+        )
+        calib_steps.setAlignment_(AppKit.NSTextAlignmentCenter)
+        cell = calib_steps.cell()
+        if cell is not None:
+            cell.setWraps_(True)
+
+        self._calib_overlay.addSubview_(calib_title)
+        self._calib_overlay.addSubview_(calib_steps)
+        self._calib_overlay.setHidden_(True)
+        content.addSubview_(self._calib_overlay)
 
         # ------------------------------------------------------------------
         # Sidebar (right side, 380px wide)
