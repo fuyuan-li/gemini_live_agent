@@ -40,6 +40,15 @@ class AcousticEchoCanceller:
     def active(self) -> bool:
         return self._ec is not None
 
+    def prime_with_silence(self, latency_s: float) -> None:
+        """Pre-fill ref buffer with silence equal to output latency so that
+        the reference signal is time-aligned with the actual speaker output."""
+        if self._ec is None:
+            return
+        silence_bytes = int(latency_s * IN_RATE) * 2  # int16 = 2 bytes/sample
+        self._ref_buf.extend(bytes(silence_bytes))
+        print(f"[AEC] primed {int(latency_s * 1000)}ms silence into ref_buf ({silence_bytes} bytes)")
+
     def push_speaker(self, pcm_24k: bytes) -> None:
         """Called when server sends TTS audio. Resamples and buffers as reference."""
         if self._ec is None or not pcm_24k:

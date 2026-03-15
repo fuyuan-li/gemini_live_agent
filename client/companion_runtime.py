@@ -304,6 +304,7 @@ class CompanionRuntime:
             lat = out.latency
             self._output_latency_s = float(lat if isinstance(lat, (int, float)) else lat[1])
             print(f"[audio] output latency={self._output_latency_s*1000:.1f}ms")
+            self._aec.prime_with_silence(self._output_latency_s)
             async for msg in ws:
                 if isinstance(msg, bytes) and msg:
                     out.write(msg)
