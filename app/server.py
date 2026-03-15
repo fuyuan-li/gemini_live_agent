@@ -366,6 +366,8 @@ async def ws(user_id: str, session_id: str, websocket: WebSocket) -> None:
                         f"turn_complete={turn_complete} interrupted={interrupted} "
                         f"finish_reason={getattr(event, 'finish_reason', None)}"
                     )
+                if interrupted:
+                    await bridge.send_json({"type": "interrupt"})
                 if not event.content or not event.content.parts:
                     continue
                 for part in event.content.parts:

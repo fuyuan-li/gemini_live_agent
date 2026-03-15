@@ -275,28 +275,50 @@ class CompanionRuntime:
         ws: websockets.ClientConnection,
         executor: LocalToolExecutor,
     ) -> None:
+        audio_q: asyncio.Queue[bytes] = asyncio.Queue()
+
+        async def _audio_writer(out: sd.RawOutputStream) -> None:
+            while True:
+                chunk = await audio_q.get()
+                out.write(chunk)
+
         with sd.RawOutputStream(
             samplerate=OUT_RATE,
             channels=CHANNELS_OUT,
             dtype=DTYPE,
             blocksize=0,
         ) as out:
-            async for msg in ws:
-                if isinstance(msg, bytes) and msg:
-                    out.write(msg)
-                    continue
-                if not isinstance(msg, str):
-                    continue
+            writer_task = asyncio.create_task(_audio_writer(out))
+            try:
+                async for msg in ws:
+                    if isinstance(msg, bytes) and msg:
+                        await audio_q.put(msg)
+                        continue
+                    if not isinstance(msg, str):
+                        continue
+                    try:
+                        payload = json.loads(msg)
+                    except Exception:
+                        continue
+                    if payload.get("type") == "interrupt":
+                        drained = 0
+                        while not audio_q.empty():
+                            audio_q.get_nowait()
+                            drained += 1
+                        print(f"[barge-in] interrupt: cleared {drained} pending audio chunks")
+                        continue
+                    if payload.get("type") == "audio_gate":
+                        await self._handle_audio_gate(payload)
+                        continue
+                    if self.state.handle_server_message(payload):
+                        continue
+                    await executor.handle_message(payload)
+            finally:
+                writer_task.cancel()
                 try:
-                    payload = json.loads(msg)
-                except Exception:
-                    continue
-                if payload.get("type") == "audio_gate":
-                    await self._handle_audio_gate(payload)
-                    continue
-                if self.state.handle_server_message(payload):
-                    continue
-                await executor.handle_message(payload)
+                    await writer_task
+                except asyncio.CancelledError:
+                    pass
 
     async def _handle_audio_gate(self, payload: dict[str, object]) -> None:
         state = str(payload.get("state", "") or "").lower()
