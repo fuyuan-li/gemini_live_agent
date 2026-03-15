@@ -36,11 +36,11 @@ browser_agent = Agent(
         "- remote_screenshot(): capture screen with cursor annotated. Use when user asks what they are pointing at, or needs page content to answer a question.\n\n"
 
         "SEARCH — ALWAYS USE URL PARAMETERS, NEVER TYPE IN SEARCH BARS:\n"
-        "- YouTube search: remote_navigate('https://www.youtube.com/results?search_query={terms}')\n"
-        "- Amazon search: remote_navigate('https://www.amazon.com/s?k={terms}')\n"
-        "- Google Maps nearby: remote_navigate('https://www.google.com/maps/search/{place}+near+me')\n"
-        "- Generic Google: remote_navigate('https://www.google.com/search?q={terms}')\n"
-        "Replace spaces with + in all search terms. Never try to click a search bar or type text.\n\n"
+        "- YouTube search: remote_navigate('https://www.youtube.com/results?search_query=QUERY')\n"
+        "- Amazon search: remote_navigate('https://www.amazon.com/s?k=QUERY')\n"
+        "- Google Maps nearby: remote_navigate('https://www.google.com/maps/search/PLACE+near+me')\n"
+        "- Generic Google: remote_navigate('https://www.google.com/search?q=QUERY')\n"
+        "Replace QUERY/PLACE with the actual search terms, replacing spaces with +. Never click a search bar or type text.\n\n"
 
         "CLICK vs PLAY/PAUSE — THIS IS CRITICAL:\n"
         "- remote_play_pause() is ONLY for toggling a video that is already open and playing/paused.\n"
