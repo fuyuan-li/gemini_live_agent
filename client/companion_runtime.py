@@ -16,6 +16,15 @@ from client.session_ids import build_ws_session_url, generate_session_id, normal
 from client.ws_guard import OutboundTelemetry, WSSender
 
 
+def _find_builtin_mic_device() -> int | None:
+    """Return sounddevice index of the MacBook built-in microphone, or None."""
+    for i, dev in enumerate(sd.query_devices()):
+        name = str(dev.get("name", ""))
+        if dev.get("max_input_channels", 0) > 0 and "Built-in" in name:
+            return i
+    return None
+
+
 IN_RATE = 16000
 OUT_RATE = 24000
 CHANNELS_IN = 1
@@ -239,6 +248,13 @@ class CompanionRuntime:
         q: asyncio.Queue[bytes] = asyncio.Queue()
         self._mic_queue = q
 
+        builtin_mic = _find_builtin_mic_device()
+        if builtin_mic is not None:
+            dev_name = sd.query_devices(builtin_mic)["name"]
+            print(f"[audio] input device: [{builtin_mic}] {dev_name} (built-in mic)")
+        else:
+            print("[audio] input device: system default (built-in mic not found)")
+
         def callback(indata, frames, time_info, status) -> None:
             if status:
                 return
@@ -250,6 +266,7 @@ class CompanionRuntime:
             dtype=DTYPE,
             blocksize=CHUNK_SAMPLES,
             callback=callback,
+            device=builtin_mic,
         ):
             self.state.record_local_event(
                 request_id=self.state.session_id,
