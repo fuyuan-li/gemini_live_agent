@@ -275,50 +275,68 @@ class CompanionRuntime:
         ws: websockets.ClientConnection,
         executor: LocalToolExecutor,
     ) -> None:
-        audio_q: asyncio.Queue[bytes] = asyncio.Queue()
+        # Pull-mode playback buffer: PortAudio callback reads from this deque.
+        # Thread-safe so the asyncio thread (writer) and PortAudio thread (reader)
+        # can access it concurrently. On interrupt we clear() it; the next callback
+        # period (~43ms) the output goes silent.
+        _playback_lock = threading.Lock()
+        _playback_buf = bytearray()
 
-        async def _audio_writer(out: sd.RawOutputStream) -> None:
-            while True:
-                chunk = await audio_q.get()
-                out.write(chunk)
+        def _playback_push(data: bytes) -> None:
+            with _playback_lock:
+                _playback_buf.extend(data)
+
+        def _playback_clear() -> int:
+            with _playback_lock:
+                n = len(_playback_buf)
+                _playback_buf.clear()
+                return n
+
+        BLOCKSIZE = 1024  # ~43ms at 24kHz; controls interrupt latency
+
+        def _audio_callback(outdata, frames, time_info, status) -> None:  # noqa: ARG001
+            need = frames * 2  # int16 = 2 bytes/sample, mono
+            with _playback_lock:
+                have = len(_playback_buf)
+                if have >= need:
+                    outdata[:] = bytes(_playback_buf[:need])
+                    del _playback_buf[:need]
+                else:
+                    # Underrun: play what we have + silence
+                    outdata[:have] = bytes(_playback_buf)
+                    outdata[have:] = b"\x00" * (need - have)
+                    _playback_buf.clear()
 
         with sd.RawOutputStream(
             samplerate=OUT_RATE,
             channels=CHANNELS_OUT,
             dtype=DTYPE,
-            blocksize=0,
-        ) as out:
-            writer_task = asyncio.create_task(_audio_writer(out))
-            try:
-                async for msg in ws:
-                    if isinstance(msg, bytes) and msg:
-                        await audio_q.put(msg)
-                        continue
-                    if not isinstance(msg, str):
-                        continue
-                    try:
-                        payload = json.loads(msg)
-                    except Exception:
-                        continue
-                    if payload.get("type") == "interrupt":
-                        drained = 0
-                        while not audio_q.empty():
-                            audio_q.get_nowait()
-                            drained += 1
-                        print(f"[barge-in] interrupt: cleared {drained} pending audio chunks")
-                        continue
-                    if payload.get("type") == "audio_gate":
-                        await self._handle_audio_gate(payload)
-                        continue
-                    if self.state.handle_server_message(payload):
-                        continue
-                    await executor.handle_message(payload)
-            finally:
-                writer_task.cancel()
+            blocksize=BLOCKSIZE,
+            callback=_audio_callback,
+        ):
+            async for msg in ws:
+                if isinstance(msg, bytes) and msg:
+                    _playback_push(msg)
+                    continue
+                if not isinstance(msg, str):
+                    continue
                 try:
-                    await writer_task
-                except asyncio.CancelledError:
-                    pass
+                    payload = json.loads(msg)
+                except Exception:
+                    continue
+                if payload.get("type") == "interrupt":
+                    cleared_bytes = _playback_clear()
+                    print(
+                        f"[barge-in] interrupt: cleared {cleared_bytes} bytes "
+                        f"({cleared_bytes / (OUT_RATE * 2) * 1000:.0f}ms of audio)"
+                    )
+                    continue
+                if payload.get("type") == "audio_gate":
+                    await self._handle_audio_gate(payload)
+                    continue
+                if self.state.handle_server_message(payload):
+                    continue
+                await executor.handle_message(payload)
 
     async def _handle_audio_gate(self, payload: dict[str, object]) -> None:
         state = str(payload.get("state", "") or "").lower()
