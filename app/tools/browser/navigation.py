@@ -14,3 +14,11 @@ async def navigate(url: str) -> dict:
     page = await get_page(headless=False)
     await page.goto(url, wait_until="domcontentloaded")
     return {"ok": True, "url": page.url, "title": await page.title()}
+
+
+async def go_back() -> dict:
+    page = await get_page(headless=False)
+    response = await page.go_back(wait_until="domcontentloaded")
+    if response is None:
+        return {"ok": False, "error": "No previous page in history."}
+    return {"ok": True, "url": page.url, "title": await page.title()}

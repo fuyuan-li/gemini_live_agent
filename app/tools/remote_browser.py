@@ -96,3 +96,11 @@ async def remote_drag_here(tool_context: ToolContext, dx: int, dy: int, steps: i
         "drag_here",
         {"dx": int(dx), "dy": int(dy), "steps": int(steps)},
     )
+
+
+async def remote_play_pause(tool_context: ToolContext) -> dict:
+    return await _call(tool_context, "play_pause", {})
+
+
+async def remote_go_back(tool_context: ToolContext) -> dict:
+    return await _call(tool_context, "go_back", {})

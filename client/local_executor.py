@@ -10,7 +10,8 @@ from app.tools.browser.mouse import (
     pan,
     scroll_screen_point,
 )
-from app.tools.browser.navigation import navigate
+from app.tools.browser.media import play_pause
+from app.tools.browser.navigation import go_back, navigate
 from client.actions.screenshot import take_screenshot
 from client.actions.tts import speak_text_locally
 from client.cursor.provider import CursorProvider
@@ -166,6 +167,12 @@ class LocalToolExecutor:
         if tool == "tts":
             text = args.get("text", "")
             return await speak_text_locally(text)
+
+        if tool == "play_pause":
+            return await play_pause()
+
+        if tool == "go_back":
+            return await go_back()
 
         raise RuntimeError(f"Unknown tool: {tool}")
 
