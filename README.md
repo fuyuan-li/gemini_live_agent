@@ -5,6 +5,7 @@ A new way to interact with the web — a live AI agent that sees, talks, and act
 **Works for:** hands-busy situations (cooking, presenting), accessibility (elderly users, limited hand mobility), and tasks where pointing is faster than describing (shopping, research).
 
 > **macOS only.** Requires Python 3.11+, a webcam, and a microphone.
+> **Recommended: use headphone** Otherwise there will be echo loops, which is an known issue from community discussion over ADK.
 
 ---
 
@@ -55,9 +56,11 @@ wand
 On first launch macOS will ask for **Camera** and **Microphone** access — click **Allow** for both.
 
 The app connects automatically to the shared backend at:
+
 ```
 wss://adk-agent-orchestrator-385929302643.us-central1.run.app/ws
 ```
+
 No configuration needed — it just works.
 
 ### Update
@@ -68,24 +71,24 @@ Re-run the same install command. It will pull the latest code and skip re-downlo
 
 ## Troubleshooting
 
-| Problem | Fix |
-|---------|-----|
-| `wand: command not found` | Open a new terminal or run `source ~/.zshrc` |
-| Camera / mic not working | System Settings → Privacy & Security → Camera/Microphone → enable Terminal |
-| Stuck on "Connecting…" | Check internet connection; backend runs on Google Cloud Run |
-| Broken after an update | Delete `~/.local/share/companion-agent/.venv`, then re-run the install command |
+| Problem                   | Fix                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| `wand: command not found` | Open a new terminal or run `source ~/.zshrc`                                   |
+| Camera / mic not working  | System Settings → Privacy & Security → Camera/Microphone → enable Terminal     |
+| Stuck on "Connecting…"    | Check internet connection; backend runs on Google Cloud Run                    |
+| Broken after an update    | Delete `~/.local/share/companion-agent/.venv`, then re-run the install command |
 
 ---
 
 ## How it works
 
-| What you do | What happens |
-|-------------|--------------|
-| Speak naturally | Gemini Live transcribes and routes your request |
-| Say "open Google Maps" | The embedded browser navigates automatically |
-| Point your finger at something | The app tracks your hand via webcam |
-| Say "click here" | The AI clicks where your finger is pointing |
-| Say "what is this?" | The AI takes a screenshot and describes what it sees |
+| What you do                    | What happens                                         |
+| ------------------------------ | ---------------------------------------------------- |
+| Speak naturally                | Gemini Live transcribes and routes your request      |
+| Say "open Google Maps"         | The embedded browser navigates automatically         |
+| Point your finger at something | The app tracks your hand via webcam                  |
+| Say "click here"               | The AI clicks where your finger is pointing          |
+| Say "what is this?"            | The AI takes a screenshot and describes what it sees |
 
 Each machine gets a stable unique user ID derived from its hostname (stored in `~/.config/companion-agent/user_id`), so multiple users can connect simultaneously without conflicts.
 
@@ -123,6 +126,7 @@ A `deploy.sh` script automates the full deployment:
 The script enables all required GCP APIs, verifies that `GOOGLE_API_KEY` exists in Secret Manager, builds a container from source, and deploys to Cloud Run — injecting the key securely via `--set-secrets` (never hardcoded).
 
 **Prerequisite:** store your Gemini API key in Secret Manager once:
+
 ```bash
 gcloud secrets create GOOGLE_API_KEY --data-file=- <<< "YOUR_KEY"
 ```
