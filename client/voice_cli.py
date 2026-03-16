@@ -11,7 +11,7 @@ import websockets
 
 from client.cursor.provider import CursorProvider, HandCursorProvider, MouseCursorProvider
 from client.local_executor import LocalToolExecutor
-from client.session_ids import DEFAULT_WS_ROOT_URL, build_ws_session_url, generate_session_id, normalize_ws_root_url
+from client.session_ids import DEFAULT_WS_ROOT_URL, build_ws_session_url, generate_session_id, get_stable_user_id, normalize_ws_root_url
 from client.ws_guard import OutboundTelemetry, WSSender
 
 # Live audio requirements per ADK streaming guide:
@@ -33,6 +33,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Voice client with cursor streaming")
 
     p.add_argument("--ws-url", default=DEFAULT_WS_URL)
+    p.add_argument("--user-id", default=None,
+                   help="User ID to include in the WebSocket URL (default: stable machine ID)")
 
     p.add_argument("--cursor-source", choices=["hand", "mouse"], default="hand")
     p.add_argument("--cursor-send-hz", type=float, default=20.0)
@@ -172,7 +174,8 @@ async def run_client(args: argparse.Namespace) -> None:
     if not provider.start():
         raise RuntimeError(f"failed to start cursor provider: {provider.status()}")
 
-    ws_root_url = normalize_ws_root_url(args.ws_url)
+    user_id = args.user_id if args.user_id else get_stable_user_id()
+    ws_root_url = normalize_ws_root_url(f"{args.ws_url.rstrip('/')}/{user_id}")
     session_id = generate_session_id()
     loop = asyncio.get_running_loop()
     toggle_q: asyncio.Queue[None] = asyncio.Queue()
