@@ -2,7 +2,7 @@
 # The server (Cloud Run) uses requirements-cloud.txt instead.
 
 # WebSocket client
-websockets==15.0.1
+websockets>=13.0
 
 # Audio IO
 sounddevice>=0.4.6
