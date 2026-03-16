@@ -6,6 +6,27 @@ A voice-first AI assistant with hand-gesture control and an embedded browser —
 
 ---
 
+## For Judges
+
+macOS only. Python 3.11+, webcam, microphone required.
+
+**Step 1 — Install client** (one command, ~2–3 min):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fuyuan-li/gemini_live_agent/main/install.sh | bash
+```
+
+**Step 2 — Run:**
+
+```bash
+holly
+```
+
+The app connects automatically to the live backend on Google Cloud Run.
+No API keys or configuration needed.
+
+---
+
 ## Install (end users)
 
 Open Terminal and run:
