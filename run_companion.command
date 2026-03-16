@@ -1,5 +1,5 @@
 #!/bin/bash
-# Double-click this file in Finder to launch the Live Agent Companion app.
+# Double-click this file in Finder to launch the Wand app.
 # On first run, macOS will ask for Camera and Microphone access — click Allow.
 
 set -e
@@ -20,6 +20,6 @@ source .venv/bin/activate
 # ── Launch ───────────────────────────────────────────────────────────────────
 # --ws-url  Base WebSocket URL (no user-id — it's appended automatically from
 #           your machine's hostname, persisted in ~/.config/companion-agent/user_id)
-echo "Starting Live Agent Companion..."
+echo "Starting Wand..."
 python -m client.companion_app \
     --ws-url "wss://adk-agent-orchestrator-385929302643.us-central1.run.app/ws"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# deploy.sh — Deploy the Live Agent Companion server to Google Cloud Run
+# deploy.sh — Deploy the Wand server to Google Cloud Run
 #
 # Prerequisites:
 #   - gcloud CLI installed and authenticated (gcloud auth login)
@@ -28,8 +28,8 @@ error() { echo -e "${RED}✗${NC} $*"; exit 1; }
 [ -z "$PROJECT_ID" ] && error "No GCP project set. Run: gcloud config set project YOUR_PROJECT_ID"
 
 echo ""
-echo "  Live Agent Companion — Cloud Run Deploy"
-echo "  ─────────────────────────────────────────"
+echo "  Wand — Cloud Run Deploy"
+echo "  ─────────────────────────"
 echo "  Service : $SERVICE"
 echo "  Project : $PROJECT_ID"
 echo "  Region  : $REGION"

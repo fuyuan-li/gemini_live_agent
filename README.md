@@ -1,6 +1,8 @@
-# Live Agent Companion
+# Wand
 
-A voice-first AI assistant with hand-gesture control and an embedded browser — powered by Google Gemini Live and ADK.
+A new way to interact with the web — speak and point at your screen while the AI sees, talks, and acts in real time. No typing. No mouse.
+
+**Works for:** hands-busy situations (cooking, presenting), accessibility (elderly users, limited hand mobility), and tasks where pointing is faster than describing (shopping, research).
 
 > **macOS only.** Requires Python 3.11+, a webcam, and a microphone.
 
@@ -19,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/fuyuan-li/gemini_live_agent/main/in
 **Step 2 — Run:**
 
 ```bash
-holly
+wand
 ```
 
 The app connects automatically to the live backend on Google Cloud Run.
@@ -40,14 +42,14 @@ The installer will:
 1. Clone this repository to `~/.local/share/companion-agent`
 2. Create a Python virtual environment and install all dependencies
 3. Download the Chromium browser (~150 MB, one time only)
-4. Add a `holly` command to your PATH
+4. Add a `wand` command to your PATH
 
 **First-time duration:** about 2–3 minutes (mostly the Chromium download).
 
 ### Start the app
 
 ```bash
-holly
+wand
 ```
 
 On first launch macOS will ask for **Camera** and **Microphone** access — click **Allow** for both.
@@ -68,7 +70,7 @@ Re-run the same install command. It will pull the latest code and skip re-downlo
 
 | Problem | Fix |
 |---------|-----|
-| `holly: command not found` | Open a new terminal or run `source ~/.zshrc` |
+| `wand: command not found` | Open a new terminal or run `source ~/.zshrc` |
 | Camera / mic not working | System Settings → Privacy & Security → Camera/Microphone → enable Terminal |
 | Stuck on "Connecting…" | Check internet connection; backend runs on Google Cloud Run |
 | Broken after an update | Delete `~/.local/share/companion-agent/.venv`, then re-run the install command |
@@ -134,7 +136,7 @@ The server (Google Cloud Run) handles all agent orchestration and AI inference. 
 ```
 Cloud Run (server)                    Local machine (client)
 ──────────────────                    ──────────────────────
-FastAPI + Google ADK                  companion_app (holly)
+FastAPI + Google ADK                  companion_app (wand)
 Gemini Live API (BIDI streaming)  ←→  mic / speaker / webcam
 concierge → browser_agent            Playwright browser
                                       hand tracking (MediaPipe)

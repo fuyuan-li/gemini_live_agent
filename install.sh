@@ -1,18 +1,18 @@
 #!/bin/bash
-# Live Agent Companion — one-line installer
+# Wand — one-line installer
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/fuyuan-li/gemini_live_agent/main/install.sh | bash
 #
 # After installation, start the app by typing:
-#   holly
+#   wand
 
 set -e
 
 REPO_URL="https://github.com/fuyuan-li/gemini_live_agent.git"
 INSTALL_DIR="$HOME/.local/share/companion-agent"
 BIN_DIR="$HOME/.local/bin"
-CMD="holly"
+CMD="wand"
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
@@ -21,8 +21,8 @@ warn()  { echo -e "${YELLOW}!${NC} $*"; }
 error() { echo -e "${RED}✗${NC} $*"; exit 1; }
 
 echo ""
-echo "  Live Agent Companion — Installer"
-echo "  ─────────────────────────────────"
+echo "  Wand — Installer"
+echo "  ─────────────────"
 echo ""
 
 # ── 1. Check Python 3.11+ ────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     info "Updating existing installation at $INSTALL_DIR ..."
     git -C "$INSTALL_DIR" pull --ff-only --quiet
 else
-    info "Downloading Live Agent Companion..."
+    info "Downloading Wand..."
     git clone --quiet "$REPO_URL" "$INSTALL_DIR"
 fi
 
@@ -98,7 +98,7 @@ echo ""
 echo -e "  ${GREEN}Installation complete!${NC}"
 echo ""
 echo "  Start the app:"
-echo "    companion"
+echo "    $CMD"
 echo ""
 echo "  First launch: macOS will ask for Camera and Microphone access — click Allow."
 echo ""
