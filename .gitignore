@@ -55,3 +55,10 @@ notes.txt
 
 # scripts
 scripts/
+
+# Claude
+.claude/
+CLAUDE.md
+
+# Personal
+TODO.md
