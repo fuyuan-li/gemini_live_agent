@@ -1,6 +1,6 @@
 # Wand
 
-A new way to interact with the web — speak and point at your screen while the AI sees, talks, and acts in real time. No typing. No mouse.
+A new way to interact with the web — a live AI agent that sees, talks, and acts in real time as you speak and point at your screen. No typing. No mouse.
 
 **Works for:** hands-busy situations (cooking, presenting), accessibility (elderly users, limited hand mobility), and tasks where pointing is faster than describing (shopping, research).
 
