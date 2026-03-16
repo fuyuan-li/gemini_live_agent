@@ -2,8 +2,6 @@
 import asyncio
 from typing import Optional, Tuple
 
-from google.adk.tools.tool_context import ToolContext
-
 from app.runtime import get_page, refresh_browser_geometry
 from app.runtime.browser_runtime import BrowserGeometry
 
@@ -117,7 +115,7 @@ def _geometry_to_payload(geometry: BrowserGeometry) -> dict:
 # Cursor-driven tools (ToolContext.state)
 # -----------------------------
 
-def _get_cursor_from_state(tool_context: ToolContext) -> Optional[Tuple[int, int]]:
+def _get_cursor_from_state(tool_context) -> Optional[Tuple[int, int]]:
     """
     Read cursor from ADK session state.
 
@@ -224,7 +222,7 @@ async def drag_screen_point_by_offset(
     return result
 
 
-async def click_here(tool_context: ToolContext) -> dict:
+async def click_here(tool_context) -> dict:
     """
     Click at the current OS mouse cursor position ("here").
     """
@@ -235,7 +233,7 @@ async def click_here(tool_context: ToolContext) -> dict:
     return await click_screen_point(cur[0], cur[1])
 
 
-async def scroll_here(tool_context: ToolContext, delta_y: int, delta_x: int = 0) -> dict:
+async def scroll_here(tool_context, delta_y: int, delta_x: int = 0) -> dict:
     """
     Wheel scroll at the current OS cursor position.
     Useful for 'zoom here' behavior on map/canvas apps.
@@ -247,7 +245,7 @@ async def scroll_here(tool_context: ToolContext, delta_y: int, delta_x: int = 0)
     return await scroll_screen_point(cur[0], cur[1], delta_y=int(delta_y), delta_x=int(delta_x))
 
 
-async def drag_here(tool_context: ToolContext, dx: int, dy: int, steps: int = 30) -> dict:
+async def drag_here(tool_context, dx: int, dy: int, steps: int = 30) -> dict:
     """
     Drag starting at current cursor position by (dx,dy) in viewport pixels.
     """
