@@ -56,7 +56,7 @@ if [ ! -d ".venv" ]; then
     "$PY" -m venv .venv
 
     info "Installing Python dependencies (this takes ~1 min the first time)..."
-    .venv/bin/pip install -q -r requirements.txt
+    .venv/bin/pip install -q -r requirements-client.txt
 
     info "Downloading Chromium browser (~150 MB)..."
     .venv/bin/python -m playwright install chromium

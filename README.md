@@ -90,132 +90,31 @@ Hand calibration: follow the cyan ring targets in sequence (Top-Left → Top-Rig
 
 ### Deploy server to Cloud Run
 
+A `deploy.sh` script automates the full deployment:
+
 ```bash
-gcloud run deploy adk-agent-orchestrator \
-  --source . \
-  --region us-central1 \
-  --allow-unauthenticated
+./deploy.sh                   # uses your gcloud default project
+./deploy.sh my-project-id     # explicit project
 ```
 
-Set `GOOGLE_API_KEY` in the Cloud Run service environment variables.
+The script enables all required GCP APIs, verifies that `GOOGLE_API_KEY` exists in Secret Manager, builds a container from source, and deploys to Cloud Run — injecting the key securely via `--set-secrets` (never hardcoded).
+
+**Prerequisite:** store your Gemini API key in Secret Manager once:
+```bash
+gcloud secrets create GOOGLE_API_KEY --data-file=- <<< "YOUR_KEY"
+```
 
 ---
 
-## Runtime Split
+## Architecture
 
-The project now supports a cloud-orchestrated runtime:
+The server (Google Cloud Run) handles all agent orchestration and AI inference. The local client owns the microphone, speaker, webcam, and the embedded Playwright browser. Browser actions are forwarded over WebSocket as `tool_call` / `tool_result` messages.
 
-- Cloud Run hosts the FastAPI + ADK orchestrator.
-- The local client still owns mic/speaker, cursor tracking, and the visible Playwright browser.
-- Browser actions are forwarded over the existing WebSocket as `tool_call` / `tool_result` JSON messages.
-
-## Phase 1: Standalone Webcam Cursor (no voice required)
-
-Run standalone cursor debug tool first to validate camera, mapping, and UI:
-
-```bash
-python -m client.cursor_debug --camera-index 0 --overlay --preview
 ```
-
-The tracker uses MediaPipe Tasks API and a `hand_landmarker.task` model.
-It uses the bundled read-only model at:
-
-`client/models/hand_landmarker.task`
-
-Controls:
-
-- `o` / `toggle_overlay`: toggle cursor overlay visibility
-- `c` / `calibrate`: run guided 4-point calibration
-- `clear_calibration`: clear active in-memory calibration
-- `q`: quit
-
-Calibration notes:
-
-- Calibration is optional and off by default until you run `c` / `calibrate`.
-- Calibration stays in the current client process only; it is not written to disk.
-
-Notes:
-
-- Overlay dot is a virtual cursor marker (does not move OS mouse).
-- Overlay currently uses a native macOS implementation (no cv2 fallback).
-- Preview window is optional and rendered as a small bottom-right window.
-
-## Phase 1 Integration: Voice Client + Cursor Stream
-
-By default, `voice_cli` uses hand cursor provider and sends cursor over WS.
-
-```bash
-python client/voice_cli.py --cursor-source hand --camera-index 0 --hand-overlay --hand-preview
-```
-
-Use mouse fallback mode:
-
-```bash
-python client/voice_cli.py --cursor-source mouse
-```
-
-Useful options:
-
-- `--cursor-send-hz 20`
-- `--cursor-stale-ms 400`
-- `--hand-smoothing 0.35`
-- `--hand-overlay-radius 10`
-
-## Agent Topology
-
-Current topology:
-
-- `concierge` -> `browser_agent`
-
-Responsibilities:
-
-- `concierge`: handles top-level voice interaction, owns non-browser conversation, and delegates browser requests.
-- `browser_agent`: runs in the orchestrator and forwards browser actions to the local executor (`navigate`, `click_here`, `scroll_here`, `drag_here`, `pan`).
-
-Handoff rules:
-
-- `browser_agent` only handles browser control: opening pages/sites and interacting with the current page.
-- If the user asks for something outside browser control, or the request is ambiguous, `browser_agent` transfers back to `concierge`.
-- This handoff uses ADK's built-in `transfer_to_agent`; do not add `transfer_to_agent` manually to `tools=[...]` when the agent already has `sub_agents`.
-
-## Protocol
-
-Cursor payload supports required + optional fields:
-
-```json
-{
-  "type": "cursor",
-  "x": 100,
-  "y": 200,
-  "source": "hand",
-  "confidence": 0.92,
-  "ts": 1730000000.0
-}
-```
-
-Server only requires `type/x/y`; optional fields are accepted for forward compatibility.
-
-Tool bridge payloads:
-
-```json
-{
-  "type": "tool_call",
-  "call_id": "uuid",
-  "tool": "navigate",
-  "args": {
-    "url": "https://maps.google.com"
-  }
-}
-```
-
-```json
-{
-  "type": "tool_result",
-  "call_id": "uuid",
-  "ok": true,
-  "result": {
-    "url": "https://maps.google.com",
-    "title": "Google Maps"
-  }
-}
+Cloud Run (server)                    Local machine (client)
+──────────────────                    ──────────────────────
+FastAPI + Google ADK                  companion_app (holly)
+Gemini Live API (BIDI streaming)  ←→  mic / speaker / webcam
+concierge → browser_agent            Playwright browser
+                                      hand tracking (MediaPipe)
 ```
