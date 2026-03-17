@@ -8,7 +8,11 @@ __pycache__
 **/.env
 **/.env.*
 tests
-client/models
+client
+install.sh
+deploy.sh
+requirements.txt
+requirements-client.txt
 notes.txt
 **/notes.txt
 scripts/use-adk-agent.sh

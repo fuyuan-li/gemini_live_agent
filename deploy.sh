@@ -51,17 +51,28 @@ if ! gcloud secrets describe GOOGLE_API_KEY --project="$PROJECT_ID" &>/dev/null;
     error "Secret 'GOOGLE_API_KEY' not found in project '$PROJECT_ID'.\n  Create it with:\n  gcloud secrets create GOOGLE_API_KEY --project=$PROJECT_ID --data-file=- <<< \"YOUR_KEY\""
 fi
 
-# ── 3. Deploy to Cloud Run ────────────────────────────────────────────────────
+# ── 3. Grant Secret Manager access to the Cloud Run service account ───────────
+info "Granting Secret Manager access to the Cloud Run service account..."
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)")
+COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:${COMPUTE_SA}" \
+    --role="roles/secretmanager.secretAccessor" \
+    --condition=None \
+    --quiet
+
+# ── 4. Deploy to Cloud Run ────────────────────────────────────────────────────
 info "Deploying $SERVICE to Cloud Run (this builds the container from source)..."
 gcloud run deploy "$SERVICE" \
     --source . \
     --region "$REGION" \
     --project "$PROJECT_ID" \
     --allow-unauthenticated \
+    --timeout 3600 \
     --set-secrets="GOOGLE_API_KEY=GOOGLE_API_KEY:latest" \
     --quiet
 
-# ── 4. Print service URL ──────────────────────────────────────────────────────
+# ── 5. Print service URL ──────────────────────────────────────────────────────
 echo ""
 SERVICE_URL=$(gcloud run services describe "$SERVICE" \
     --region "$REGION" \
